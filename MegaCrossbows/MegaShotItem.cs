@@ -7,7 +7,7 @@ using System.Reflection;
 namespace MegaCrossbows
 {
     /// <summary>
-    /// Custom MegaShot crossbow — cloned from CrossbowDundr with 4 quality levels,
+    /// Custom MegaShot crossbow — cloned from StaffLightning (Dundr) with 4 quality levels,
     /// per-level damage, per-level upgrade recipes with different ingredients.
     /// </summary>
     public static class MegaShotItem
@@ -21,9 +21,9 @@ namespace MegaCrossbows
         private static Recipe megaShotRecipe;
         private static int currentRecipeLevel = -1;
 
-        // Per-level pierce damage (index 0 = level 1, index 3 = level 4)
-        // Linear: 40, 60, 80, 100 — also encoded via m_damagesPerLevel for native tooltip support
-        public static readonly float[] PierceDamagePerLevel = { 40f, 60f, 80f, 100f };
+        // Per-level total damage (index 0 = level 1, index 3 = level 4)
+        // Based on Dundr: 240, 276, 312, 348 — split evenly across all enabled damage types
+        public static readonly float[] TotalDamagePerLevel = { 240f, 276f, 312f, 348f };
 
         // Per-level recipe ingredient prefab names (all 5 each)
         private static readonly string[][] IngredientNames = new string[][]
@@ -60,10 +60,10 @@ namespace MegaCrossbows
             return item.m_shared.m_name == ItemName;
         }
 
-        public static float GetPierceDamage(int quality)
+        public static float GetTotalDamage(int quality)
         {
-            int idx = Mathf.Clamp(quality - 1, 0, PierceDamagePerLevel.Length - 1);
-            return PierceDamagePerLevel[idx];
+            int idx = Mathf.Clamp(quality - 1, 0, TotalDamagePerLevel.Length - 1);
+            return TotalDamagePerLevel[idx];
         }
 
         public static void Register(ObjectDB objectDB)
@@ -144,12 +144,12 @@ namespace MegaCrossbows
         {
             try
             {
-                // Find CrossbowDundr prefab
+                // Find Dundr (StaffLightning) prefab
                 GameObject dundrPrefab = null;
                 foreach (var prefab in objectDB.m_items)
                 {
                     if (prefab == null) continue;
-                    if (prefab.name == "CrossbowDundr")
+                    if (prefab.name == "StaffLightning")
                     {
                         dundrPrefab = prefab;
                         break;
@@ -185,12 +185,24 @@ namespace MegaCrossbows
                 // Clear DLC flag if any
                 try { shared.m_dlc = ""; } catch { }
 
+                // Remove ammo requirement (Dundr uses Eitr, MegaShot uses neither)
+                shared.m_ammoType = "";
+
+                // Force crossbow skill type so all Harmony patches (AOE, DoT, etc.) trigger correctly
+                shared.m_skillType = Skills.SkillType.Crossbows;
+
+                // Remove Eitr cost from attacks
+                try { shared.m_attack.m_attackEitr = 0f; } catch { }
+                try { shared.m_secondaryAttack.m_attackEitr = 0f; } catch { }
+                try { shared.m_attack.m_attackStamina = 0f; } catch { }
+
                 // Base damage (level 1) + linear per-level increment for native tooltip support
+                // Dundr native type is lightning; our postfix overrides with split values
                 var baseDmg = new HitData.DamageTypes();
-                baseDmg.m_pierce = PierceDamagePerLevel[0];
+                baseDmg.m_lightning = TotalDamagePerLevel[0];
                 shared.m_damages = baseDmg;
                 var perLevelDmg = new HitData.DamageTypes();
-                perLevelDmg.m_pierce = 20f;
+                perLevelDmg.m_lightning = 36f;
                 shared.m_damagesPerLevel = perLevelDmg;
 
                 // Register in ObjectDB
@@ -484,14 +496,15 @@ namespace MegaCrossbows
     // Manually patched in Class1.cs (not attribute-based) — safe if GetDamage doesn't exist
     public static class PatchMegaShotDamage
     {
-        // Postfix for GetDamage() (no params) — calls GetDamage(m_quality, m_worldLevel) internally
+        // Postfix for GetDamage() (no params)
         public static void Postfix(ItemDrop.ItemData __instance, ref HitData.DamageTypes __result)
         {
             try
             {
                 if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
                 if (!MegaShotItem.IsMegaShot(__instance)) return;
-                __result.m_pierce = MegaShotItem.GetPierceDamage(__instance.m_quality);
+                float totalDmg = MegaShotItem.GetTotalDamage(__instance.m_quality);
+                ApplyDamageSplit(ref __result, totalDmg);
             }
             catch { }
         }
@@ -503,9 +516,51 @@ namespace MegaCrossbows
             {
                 if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
                 if (!MegaShotItem.IsMegaShot(__instance)) return;
-                __result.m_pierce = MegaShotItem.GetPierceDamage(quality);
+                float totalDmg = MegaShotItem.GetTotalDamage(quality);
+                ApplyDamageSplit(ref __result, totalDmg);
             }
             catch { }
+        }
+
+        /// <summary>
+        /// Splits total damage evenly across all enabled damage types.
+        /// Used for tooltip display (base stats without DamageMultiplier).
+        /// </summary>
+        public static void ApplyDamageSplit(ref HitData.DamageTypes result, float totalDamage)
+        {
+            bool pierce = MegaCrossbowsPlugin.DamagePierce.Value;
+            bool blunt = MegaCrossbowsPlugin.DamageBlunt.Value;
+            bool slash = MegaCrossbowsPlugin.DamageSlash.Value;
+            bool fire = MegaCrossbowsPlugin.DamageFire.Value;
+            bool frost = MegaCrossbowsPlugin.DamageFrost.Value;
+            bool lightning = MegaCrossbowsPlugin.DamageLightning.Value;
+            bool poison = MegaCrossbowsPlugin.DamagePoison.Value;
+            bool spirit = MegaCrossbowsPlugin.DamageSpirit.Value;
+
+            int typeCount = 0;
+            if (pierce) typeCount++;
+            if (blunt) typeCount++;
+            if (slash) typeCount++;
+            if (fire) typeCount++;
+            if (frost) typeCount++;
+            if (lightning) typeCount++;
+            if (poison) typeCount++;
+            if (spirit) typeCount++;
+            if (typeCount == 0) { typeCount = 1; lightning = true; }
+
+            float perType = totalDamage / typeCount;
+
+            result.m_damage = 0f;
+            result.m_pierce = pierce ? perType : 0f;
+            result.m_blunt = blunt ? perType : 0f;
+            result.m_slash = slash ? perType : 0f;
+            result.m_fire = fire ? perType : 0f;
+            result.m_frost = frost ? perType : 0f;
+            result.m_lightning = lightning ? perType : 0f;
+            result.m_poison = poison ? perType : 0f;
+            result.m_spirit = spirit ? perType : 0f;
+            result.m_chop = 0f;
+            result.m_pickaxe = 0f;
         }
     }
 }

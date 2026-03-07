@@ -111,60 +111,58 @@ namespace MegaCrossbows
             Velocity = Config.Bind("3. Projectile", "Velocity", 470f, "Bolt velocity % (only used when WeaponProfile = Custom)");
             NoGravity = Config.Bind("3. Projectile", "NoGravity", true, "Disable gravity for bolts (default: true for accuracy)");
             
-            // Damage - Split system: base pierce is divided evenly across all enabled types
-            // BaseMultiplier scales the total. e.g. Charred bolt (82 pierce) with all 8 types enabled:
-            //   82 / 8 = 10.25 per type. With BaseMultiplier=2: 164 / 8 = 20.5 per type.
+            // Damage — Split system: per-level total damage is split evenly across all enabled types.
+            // e.g. Level 1 (240 total), all 8 types: 240/8 = 30 per type.
+            // DamageMultiplier scales the total: mult 2 → 2*(240/8) = 60 per type.
             DamageMultiplier = Config.Bind("4. Damage", "BaseMultiplier", 1f, 
                 new ConfigDescription("Overall damage multiplier (1 = normal, 2 = double total damage, 10 = 10x)", new AcceptableValueRange<float>(0f, 10f)));
             DamagePierce = Config.Bind("4. Damage", "Pierce", true,
-                "Enable pierce damage (always counts toward the split)");
+                "Enable pierce damage (splits total damage across enabled types)");
             DamageBlunt = Config.Bind("4. Damage", "Blunt", true,
-                "Enable blunt damage (splits total damage across more types)");
+                "Enable blunt damage (splits total damage across enabled types)");
             DamageSlash = Config.Bind("4. Damage", "Slash", true,
-                "Enable slash damage (splits total damage across more types)");
+                "Enable slash damage (splits total damage across enabled types)");
+            DamageFire = Config.Bind("4. Damage", "Fire", true,
+                "Enable fire damage (splits total damage across enabled types)");
+            DamageFrost = Config.Bind("4. Damage", "Frost", true,
+                "Enable frost damage (splits total damage across enabled types)");
+            DamageLightning = Config.Bind("4. Damage", "Lightning", true,
+                "Enable lightning damage (splits total damage across enabled types)");
+            DamagePoison = Config.Bind("4. Damage", "Poison", true,
+                "Enable poison damage (splits total damage across enabled types)");
+            DamageSpirit = Config.Bind("4. Damage", "Spirit", true,
+                "Enable spirit damage (splits total damage across enabled types)");
             Stagger = Config.Bind("4. Damage", "Stagger", 0f, 
                 new ConfigDescription("Stagger/knockback multiplier (0 = none, 1 = normal, 10 = 10x)", new AcceptableValueRange<float>(0f, 10f)));
-            
-            // Elemental types also split from the same pool
-            DamageFire = Config.Bind("5. Damage - Elemental", "Fire", true,
-                "Enable fire damage (splits total damage across more types)");
-            DamageFrost = Config.Bind("5. Damage - Elemental", "Frost", true,
-                "Enable frost damage (splits total damage across more types)");
-            DamageLightning = Config.Bind("5. Damage - Elemental", "Lightning", true,
-                "Enable lightning damage (splits total damage across more types)");
-            DamagePoison = Config.Bind("5. Damage - Elemental", "Poison", true,
-                "Enable poison damage (splits total damage across more types)");
-            DamageSpirit = Config.Bind("5. Damage - Elemental", "Spirit", true,
-                "Enable spirit damage (splits total damage across more types)");
-            ElementalDoT = Config.Bind("5. Damage - Elemental", "ElementalDoT", 0f, 
+            ElementalDoT = Config.Bind("4. Damage", "ElementalDoT", 0f, 
                 new ConfigDescription("Elemental damage over time multiplier (0 = none, 1 = normal, 10 = 10x stronger DoT)", new AcceptableValueRange<float>(0f, 10f)));
             
             // AOE
-            AoeRadius = Config.Bind("6. AOE", "Radius", 1f, 
+            AoeRadius = Config.Bind("5. AOE", "Radius", 1f, 
                 new ConfigDescription("Area of Effect radius (0 = disabled, 1 = default)", new AcceptableValueRange<float>(0f, 10f)));
             
             // Building Damage
-            BuildingDamage = Config.Bind("7. Building Damage", "BuildingDamageMultiplier", 1f, 
+            BuildingDamage = Config.Bind("6. Building Damage", "BuildingDamageMultiplier", 1f, 
                 new ConfigDescription("Building damage multiplier (1 = normal, 10 = 10x)", new AcceptableValueRange<float>(1f, 10f)));
-            BuildingFireDamage = Config.Bind("7. Building Damage", "BuildingFireDamage", 0f, 
+            BuildingFireDamage = Config.Bind("6. Building Damage", "BuildingFireDamage", 0f, 
                 new ConfigDescription("Fire damage to buildings - Ashlands fire behavior (0 = none, 1 = normal, 10 = 10x)", new AcceptableValueRange<float>(0f, 10f)));
-            BuildingFireDuration = Config.Bind("7. Building Damage", "BuildingFireDuration", 1f, 
+            BuildingFireDuration = Config.Bind("6. Building Damage", "BuildingFireDuration", 1f, 
                 new ConfigDescription("How long buildings burn (1 = normal Ashlands duration, 10 = 10x duration)", new AcceptableValueRange<float>(1f, 10f)));
 
             // HouseFire (ALT-mode fire spawned on impact)
-            HouseFireEnabled = Config.Bind("8. HouseFire", "Enabled", true,
+            HouseFireEnabled = Config.Bind("7. HouseFire", "Enabled", true,
                 "Enable HouseFire spawning in ALT mode (set to false to disable fire on impact)");
-            HouseFireDamage = Config.Bind("8. HouseFire", "FireDamage", 10f,
+            HouseFireDamage = Config.Bind("7. HouseFire", "FireDamage", 10f,
                 new ConfigDescription("Fire damage per tick to buildings/creatures in radius (default: 10)", new AcceptableValueRange<float>(1f, 100f)));
-            HouseFireRadius = Config.Bind("8. HouseFire", "DotRadius", 1f,
+            HouseFireRadius = Config.Bind("7. HouseFire", "DotRadius", 1f,
                 new ConfigDescription("Radius of the fire's damage sphere (default: 1m)", new AcceptableValueRange<float>(1f, 10f)));
-            HouseFireTickInterval = Config.Bind("8. HouseFire", "TickInterval", 1f,
+            HouseFireTickInterval = Config.Bind("7. HouseFire", "TickInterval", 1f,
                 new ConfigDescription("Seconds between damage ticks (lower = faster burn, default: 1)", new AcceptableValueRange<float>(0.1f, 5f)));
-            HouseFireSpread = Config.Bind("8. HouseFire", "Spread", 4,
+            HouseFireSpread = Config.Bind("7. HouseFire", "Spread", 4,
                 new ConfigDescription("Max fires allowed nearby — higher = more spread (default: 4)", new AcceptableValueRange<int>(1, 20)));
-            HouseFireSmokeDieChance = Config.Bind("8. HouseFire", "SmokeDieChance", 0.5f,
+            HouseFireSmokeDieChance = Config.Bind("7. HouseFire", "SmokeDieChance", 0.5f,
                 new ConfigDescription("Chance fire dies when suffocated by smoke (0 = immortal fire, 0.5 = default, 1 = always dies)", new AcceptableValueRange<float>(0f, 1f)));
-            HouseFireMaxSmoke = Config.Bind("8. HouseFire", "MaxSmoke", 3f,
+            HouseFireMaxSmoke = Config.Bind("7. HouseFire", "MaxSmoke", 3f,
                 new ConfigDescription("Smoke tolerance before fire can die (higher = survives longer in enclosed spaces, default: 3)", new AcceptableValueRange<float>(1f, 50f)));
 
             // Apply profile overrides
@@ -205,6 +203,23 @@ namespace MegaCrossbows
                             BindingFlags.Static | BindingFlags.Public);
                         if (postfixQuality != null)
                             _harmony.Patch(getDamageQualityMethod, postfix: new HarmonyMethod(postfixQuality));
+                    }
+                }
+                catch { }
+
+                // Manual patch for UseEitr — blocks Eitr drain when holding MegaShot
+                // (Dundr clone normally consumes Eitr; safe if UseEitr doesn't exist)
+                try
+                {
+                    var useEitrMethod = typeof(Player).GetMethod("UseEitr",
+                        BindingFlags.Public | BindingFlags.Instance, null,
+                        new Type[] { typeof(float) }, null);
+                    if (useEitrMethod != null)
+                    {
+                        var eitrPrefix = typeof(PatchBlockEitr).GetMethod("Prefix",
+                            BindingFlags.Static | BindingFlags.Public);
+                        if (eitrPrefix != null)
+                            _harmony.Patch(useEitrMethod, prefix: new HarmonyMethod(eitrPrefix));
                     }
                 }
                 catch { }

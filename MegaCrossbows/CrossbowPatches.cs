@@ -262,6 +262,25 @@ namespace MegaCrossbows
         }
     }
 
+    // Block Eitr drain for MegaShot (Dundr clone normally uses Eitr)
+    // Manually patched in Class1.cs (not attribute-based) — safe if UseEitr doesn't exist
+    public static class PatchBlockEitr
+    {
+        public static bool Prefix(Player __instance, float v)
+        {
+            try
+            {
+                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (__instance != Player.m_localPlayer) return true;
+                var weapon = __instance.GetCurrentWeapon();
+                if (weapon != null && CrossbowHelper.IsCrossbow(weapon) && v > 0f)
+                    return false;
+            }
+            catch { }
+            return true;
+        }
+    }
+
     // Block blocking stance - right-click is zoom, not block (try-catch)
     [HarmonyPatch(typeof(Humanoid))]
     public static class PatchBlockBlocking
@@ -779,40 +798,9 @@ namespace MegaCrossbows
         {
             try
             {
-            // 1. Find projectile prefab: ammo -> inventory fallback -> weapon primary -> weapon secondary
+            // 1. Find projectile prefab from weapon (no ammo — Dundr-based, uses weapon's own projectile)
             GameObject prefab = null;
-            var ammoItem = player.GetAmmoItem();
-
-            // Fallback: if GetAmmoItem() returned null (vanilla crossbow loading was
-            // blocked by PatchBlockVanillaAttack so no bolt is "loaded"), search the
-            // player's inventory directly for a bolt matching the weapon's ammo type.
-            if (ammoItem == null)
-            {
-                try
-                {
-                    string ammoType = weapon.m_shared?.m_ammoType;
-                    if (!string.IsNullOrEmpty(ammoType))
-                    {
-                        var inv = player.GetInventory();
-                        if (inv != null)
-                        {
-                            foreach (var item in inv.GetAllItems())
-                            {
-                                if (item == null || item.m_shared == null) continue;
-                                if (item.m_shared.m_ammoType != ammoType) continue;
-                                if (item.m_shared.m_attack?.m_attackProjectile == null) continue;
-                                ammoItem = item;
-                                break;
-                            }
-                        }
-                    }
-                }
-                catch { }
-            }
-
-            if (ammoItem != null && ammoItem.m_shared?.m_attack?.m_attackProjectile != null)
-                prefab = ammoItem.m_shared.m_attack.m_attackProjectile;
-            else if (weapon.m_shared?.m_attack?.m_attackProjectile != null)
+            if (weapon.m_shared?.m_attack?.m_attackProjectile != null)
                 prefab = weapon.m_shared.m_attack.m_attackProjectile;
             else if (weapon.m_shared?.m_secondaryAttack?.m_attackProjectile != null)
                 prefab = weapon.m_shared.m_secondaryAttack.m_attackProjectile;
@@ -853,22 +841,11 @@ namespace MegaCrossbows
             float speed = attack.m_projectileVel * (MegaCrossbowsPlugin.GetEffectiveVelocity() / 100f);
             Vector3 velocity = aimDir * speed;
 
-            // 5. Damage — Split system
-            // Base pierce (weapon + ammo) is the total damage pool.
-            // It's divided evenly across all ENABLED damage types, then scaled by BaseMultiplier.
-            // e.g. Charred bolt 82 pierce, all 8 types on, mult 2: 2*(82/8) = 20.5 per type.
+            // 5. Damage — Split system (no ammo, weapon-only)
+            // Total damage from per-level values, split evenly across enabled types,
+            // scaled by DamageMultiplier. e.g. Level 1 (240), all 8 types, mult 2: 2*(240/8) = 60 per type.
             HitData hitData = new HitData();
-            HitData.DamageTypes weaponDmg = weapon.GetDamage();
-            HitData.DamageTypes ammoDmg = default(HitData.DamageTypes);
-            if (ammoItem != null)
-                ammoDmg = ammoItem.GetDamage();
-
-            float basePierce = weaponDmg.m_pierce + ammoDmg.m_pierce;
-
-            // Override per-level damage for MegaShot
-            if (MegaShotItem.IsMegaShot(weapon))
-                basePierce = MegaShotItem.GetPierceDamage(weapon.m_quality) + ammoDmg.m_pierce;
-
+            float totalDamage = MegaShotItem.GetTotalDamage(weapon.m_quality);
             float overallMult = MegaCrossbowsPlugin.DamageMultiplier.Value;
 
             // Count enabled damage types
@@ -890,13 +867,11 @@ namespace MegaCrossbows
             if (lightning) typeCount++;
             if (poison) typeCount++;
             if (spirit) typeCount++;
-            if (typeCount == 0) { typeCount = 1; pierce = true; } // fallback: at least pierce
+            if (typeCount == 0) { typeCount = 1; lightning = true; } // fallback: at least lightning (Dundr native)
 
-            float perType = basePierce * overallMult / typeCount;
+            float perType = totalDamage * overallMult / typeCount;
 
-            // Weapon base damage (m_damage) passed through with multiplier only
-            hitData.m_damage.m_damage = (weaponDmg.m_damage + ammoDmg.m_damage) * overallMult;
-
+            hitData.m_damage.m_damage = 0f;
             // Split damage across enabled types
             hitData.m_damage.m_pierce = pierce ? perType : 0f;
             hitData.m_damage.m_blunt = blunt ? perType : 0f;
@@ -907,8 +882,8 @@ namespace MegaCrossbows
             hitData.m_damage.m_poison = poison ? perType : 0f;
             hitData.m_damage.m_spirit = spirit ? perType : 0f;
 
-            hitData.m_damage.m_chop = weaponDmg.m_chop + ammoDmg.m_chop;
-            hitData.m_damage.m_pickaxe = weaponDmg.m_pickaxe + ammoDmg.m_pickaxe;
+            hitData.m_damage.m_chop = 0f;
+            hitData.m_damage.m_pickaxe = 0f;
             if (weapon.m_shared != null)
                 hitData.m_skill = weapon.m_shared.m_skillType;
 
@@ -926,9 +901,8 @@ namespace MegaCrossbows
             try { hitData.m_pushForce = (weapon.m_shared?.m_attackForce ?? 0f) * staggerMult; } catch { }
             try { hitData.m_staggerMultiplier = staggerMult; } catch { }
 
-            // 6. Setup projectile (VERIFIED: 6-parameter overload)
-            var itemForSetup = ammoItem ?? weapon;
-            projectile.Setup(player, velocity, 0f, hitData, weapon, itemForSetup);
+            // 6. Setup projectile (VERIFIED: 6-parameter overload, no ammo)
+            projectile.Setup(player, velocity, 0f, hitData, weapon, weapon);
 
             // Set tool tier AFTER Setup via reflection (Setup may overwrite from item data)
             if (destroyMode)
@@ -1056,12 +1030,6 @@ namespace MegaCrossbows
                 if (!soundPlayed) soundPlayed = TryPlayEffect(attack, "m_triggerEffect", spawnPos, aimDir, player.transform);
                 if (!soundPlayed) soundPlayed = TryPlayEffect(attack, "m_startEffect", spawnPos, aimDir, player.transform);
                 if (!soundPlayed) soundPlayed = TryPlayEffect(attack, "m_hitEffect", spawnPos, aimDir, player.transform);
-                if (!soundPlayed && ammoItem?.m_shared?.m_attack != null)
-                {
-                    var ammoAtk = ammoItem.m_shared.m_attack;
-                    if (!soundPlayed) soundPlayed = TryPlayEffect(ammoAtk, "m_triggerEffect", spawnPos, aimDir, player.transform);
-                    if (!soundPlayed) soundPlayed = TryPlayEffect(ammoAtk, "m_startEffect", spawnPos, aimDir, player.transform);
-                }
 
                 // --- Attempt 2: Direct AudioSource.PlayOneShot (guaranteed reliable) ---
                 if (!soundPlayed)
@@ -1070,7 +1038,7 @@ namespace MegaCrossbows
                     if (!fireClipSearched)
                     {
                         fireClipSearched = true;
-                        cachedFireClip = FindFireClip(attack, weapon, ammoItem);
+                        cachedFireClip = FindFireClip(attack, weapon);
                     }
 
                     if (cachedFireClip != null)
@@ -1133,12 +1101,10 @@ namespace MegaCrossbows
         /// Searches all EffectList fields on Attack, SharedData, and ammo for AudioClips.
         /// Checks ZSFX (Valheim custom audio) and AudioSource components.
         /// </summary>
-        private static AudioClip FindFireClip(Attack attack, ItemDrop.ItemData weapon, ItemDrop.ItemData ammoItem)
+        private static AudioClip FindFireClip(Attack attack, ItemDrop.ItemData weapon)
         {
-            // Sources to search: attack, weapon shared data, ammo attack
-            object[] sources = ammoItem?.m_shared?.m_attack != null
-                ? new object[] { attack, weapon.m_shared, ammoItem.m_shared.m_attack }
-                : new object[] { attack, weapon.m_shared };
+            // Sources to search: attack, weapon shared data (no ammo)
+            object[] sources = new object[] { attack, weapon.m_shared };
 
             foreach (var source in sources)
             {
@@ -1230,18 +1196,6 @@ namespace MegaCrossbows
             }
             lastHudUpdate = Time.time;
 
-            // Bolt count in inventory
-            int totalBolts = 0;
-            var inv = player.GetInventory();
-            if (inv != null)
-            {
-                foreach (var item in inv.GetAllItems())
-                {
-                    if (CrossbowHelper.IsBolt(item))
-                        totalBolts += item.m_stack;
-                }
-            }
-
             // Distance: raycast from CAMERA (crosshair), measure from player to hit point.
             float range = -1f;
             Camera cam;
@@ -1280,7 +1234,7 @@ namespace MegaCrossbows
             }
             else
             {
-                CrossbowHUD.ammoText = $"{state.magazineAmmo}/{MegaCrossbowsPlugin.MagazineCapacity.Value} | {totalBolts}{zoomStr}";
+                CrossbowHUD.ammoText = $"{state.magazineAmmo}/{MegaCrossbowsPlugin.MagazineCapacity.Value}{zoomStr}";
                 CrossbowHUD.distanceText = range > 0 ? $"{range:F0}m" : "";
             }
             CrossbowHUD.showHUD = true;

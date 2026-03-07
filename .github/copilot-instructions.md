@@ -80,15 +80,19 @@ BepInEx Harmony mod for Valheim that transforms crossbows into rapid-fire weapon
 ### 0. MegaShot Custom Crossbow (`MegaShotItem`)
 - **Only the MegaShot crossbow** gets all mod features (rapid fire, damage split, zoom, etc.)
 - **All other crossbows** (Ripper, Arbalest, Dundr, etc.) function with vanilla Valheim behavior
-- Cloned from `CrossbowDundr` prefab at runtime in `ObjectDB.Awake` (uses Dundr model and firing animation)
+- Cloned from `StaffLightning` (Dundr) prefab at runtime in `ObjectDB.Awake` (uses Dundr model and firing animation)
 - **Clone safety**: parented under an inactive container GO so `activeSelf=true` but `activeInHierarchy=false` — prevents `ZNetView.Awake()` from registering a live ZDO. When Valheim `Instantiate()`s from it, the copy is root-level and fully active. Only added to `m_namedPrefabs` dict (NOT `m_prefabs` list) to avoid NullRef in `ZNetScene.RemoveObjects`.
 - Registered in ObjectDB + ZNetScene (via reflection for private fields)
 - **ObjectDB registration**: After adding to `m_items`, calls `ObjectDB.UpdateRegisters()` via reflection to rebuild BOTH `m_itemByHash` (name hash → prefab) AND `m_itemByData` (SharedData → prefab). The `m_itemByData` map is critical — without it, Valheim can't resolve MegaShot items from save data during inventory loading.
 - **Recipe lifecycle**: `megaShotRecipe` is reset to null when a new ObjectDB is created (entering world) so it gets re-created for the new instance. Recipe presence is verified against `objectDB.m_recipes` on each Register call.
 - **4 quality levels** (vanilla max) with `m_maxQuality = 4`
-- **Per-level damage** (linear): 40, 60, 80, 100 pierce
-  - Encoded via `m_damages.m_pierce = 40` and `m_damagesPerLevel.m_pierce = 20` for native tooltip support
-  - Also enforced via manual `GetDamage()` and `GetDamage(int, float)` Harmony postfixes + FireBolt override
+- **No ammo required** — `m_ammoType` cleared (Dundr normally uses Eitr; MegaShot uses neither bolts nor Eitr)
+- **Eitr drain blocked** — `m_attackEitr = 0` on prefab + manual `Player.UseEitr` Harmony prefix (safe if method doesn't exist)
+- **Per-level total damage** (based on Dundr): 240, 276, 312, 348
+  - Split evenly across all enabled damage types (8 types: Pierce, Blunt, Slash, Fire, Frost, Lightning, Poison, Spirit)
+  - Encoded via `m_damages.m_lightning = 240` and `m_damagesPerLevel.m_lightning = 36` for native tooltip base
+  - Enforced via manual `GetDamage()` and `GetDamage(int, float)` Harmony postfixes that apply the split
+  - `DamageMultiplier` config scales total at fire time (not in tooltip)
 - **Per-level recipes** with completely different ingredients per level (prefab ID in parens):
 - Level 1: 5 Wood (`Wood`), 5 Leather Scraps (`LeatherScraps`), 5 Resin (`Resin`)
 - Level 2: 5 Corewood (`RoundLog`), 5 Bear Hide (`BjornHide`), 5 Greydwarf Eye (`GreydwarfEye`)
@@ -110,16 +114,16 @@ BepInEx Harmony mod for Valheim that transforms crossbows into rapid-fire weapon
 - Vanilla attack is **blocked** (`PatchBlockVanillaAttack` on `Humanoid.StartAttack`)
 - Blocking/shield stance **blocked** while holding crossbow (`PatchBlockBlocking`)
 - Stamina drain **blocked** for crossbows (`PatchBlockStamina`)
-- **Ammo fallback**: `Player.GetAmmoItem()` returns null when vanilla loading is blocked; `FireBolt` falls back to searching inventory directly for bolts matching `weapon.m_shared.m_ammoType`
+- **No ammo needed** — projectile prefab comes from weapon's `m_attack.m_attackProjectile` (Dundr's native lightning bolt)
 - **Try-catch protection**: `HandleZoom`, `FireBolt` body, and `UpdateHUD` are all wrapped in try-catch to prevent any single exception from killing the entire fire path
 
 ### 2. Damage System — Split Damage
-Base pierce damage (weapon + ammo) is the **total damage pool**, divided evenly across all **enabled** damage types, then scaled by `BaseMultiplier`:
-- Charred bolt (82 pierce), only Pierce enabled: `82 × 1 = 82` pierce
-- All 8 types enabled: `82 / 8 = 10.25` per type
-- With BaseMultiplier=2, all 8 types: `2 × (82/8) = 20.5` per type
-- Total damage always equals `basePierce × BaseMultiplier` regardless of how many types are on
-- **Chop/Pickaxe** passed through from weapon base stats (unless Destroy Objects active)
+Per-level total damage (based on Dundr: 240/276/312/348) is the **total damage pool**, divided evenly across all **enabled** damage types, then scaled by `DamageMultiplier`:
+- Level 1, all 8 types enabled: `240 / 8 = 30` per type
+- Level 1, only Lightning enabled: `240 × 1 = 240` lightning
+- With DamageMultiplier=2, all 8 types: `2 × (240/8) = 60` per type
+- Total damage always equals `perLevelDamage × DamageMultiplier` regardless of how many types are on
+- **Chop/Pickaxe** are zero unless Destroy Objects mode is active (then tagged with 999999)
 - `Stagger` scales weapon `m_attackForce` and `m_staggerMultiplier`
 
 ### 3. Elemental DoT System
@@ -228,31 +232,27 @@ Config auto-reloads on save (FileSystemWatcher).
 | `Pierce` | bool | `true` | — | Enable pierce damage |
 | `Blunt` | bool | `true` | — | Enable blunt damage |
 | `Slash` | bool | `true` | — | Enable slash damage |
-| `Stagger` | float | `0` | 0-10 | Stagger/knockback multiplier |
-
-### 5. Damage - Elemental (also split from same pool)
-| Key | Type | Default | Range | Description |
-|---|---|---|---|---|
 | `Fire` | bool | `true` | — | Enable fire damage |
 | `Frost` | bool | `true` | — | Enable frost damage |
 | `Lightning` | bool | `true` | — | Enable lightning damage |
 | `Poison` | bool | `true` | — | Enable poison damage |
 | `Spirit` | bool | `true` | — | Enable spirit damage |
+| `Stagger` | float | `0` | 0-10 | Stagger/knockback multiplier |
 | `ElementalDoT` | float | `0` | 0-10 | DoT multiplier (0=default Valheim, 10=10x duration+damage) |
 
-### 6. AOE
+### 5. AOE
 | Key | Type | Default | Range | Description |
 |---|---|---|---|---|
 | `Radius` | float | `1` | 0-10 | AOE radius (shared: combat + object destruction) |
 
-### 7. Building Damage
+### 6. Building Damage
 | Key | Type | Default | Range | Description |
 |---|---|---|---|---|
 | `BuildingDamageMultiplier` | float | `1` | 1-10 | Building damage multiplier |
 | `BuildingFireDamage` | float | `0` | 0-10 | Ashlands fire behavior |
 | `BuildingFireDuration` | float | `1` | 1-10 | Burn duration multiplier |
 
-### 8. HouseFire (ALT-mode fire on impact)
+### 7. HouseFire (ALT-mode fire on impact)
 | Key | Type | Default | Range | Description |
 |---|---|---|---|---|
 | `Enabled` | bool | `true` | — | Enable/disable HouseFire spawning in ALT mode |
@@ -270,6 +270,7 @@ Config auto-reloads on save (FileSystemWatcher).
 | Patch Class | Target | Type | Purpose |
 |---|---|---|---|
 | `PatchBlockStamina` | `Player.UseStamina` | Prefix | Block stamina drain |
+| `PatchBlockEitr` | `Player.UseEitr` | Prefix (manual) | Block Eitr drain (safe if method missing) |
 | `PatchBlockVanillaAttack` | `Humanoid.StartAttack` | Prefix | Block vanilla attack |
 | `PatchBlockBlocking` | `Humanoid.BlockAttack` / `IsBlocking` | Prefix | Right-click = zoom |
 | `PatchDurability` | `ItemDrop.ItemData.GetMaxDurability` / `GetDurabilityPercentage` | Prefix | Indestructible crossbows |
