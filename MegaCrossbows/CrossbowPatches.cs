@@ -848,6 +848,12 @@ namespace MegaCrossbows
             float totalDamage = MegaShotItem.GetTotalDamage(weapon.m_quality);
             float overallMult = MegaCrossbowsPlugin.DamageMultiplier.Value;
 
+            // ALT-fire (destroy mode) doubles damage
+            bool destroyMode = MegaCrossbowsPlugin.DestroyObjects.Value &&
+                Input.GetKey(MegaCrossbowsPlugin.DestroyObjectsKey.Value);
+            if (destroyMode)
+                overallMult *= 2f;
+
             // Count enabled damage types
             bool pierce = MegaCrossbowsPlugin.DamagePierce.Value;
             bool blunt = MegaCrossbowsPlugin.DamageBlunt.Value;
@@ -887,9 +893,7 @@ namespace MegaCrossbows
             if (weapon.m_shared != null)
                 hitData.m_skill = weapon.m_shared.m_skillType;
 
-            // Tag bolt for object destruction if modifier key is held
-            bool destroyMode = MegaCrossbowsPlugin.DestroyObjects.Value &&
-                Input.GetKey(MegaCrossbowsPlugin.DestroyObjectsKey.Value);
+            // Tag bolt for object destruction if ALT-fire mode
             if (destroyMode)
             {
                 hitData.m_damage.m_chop = 999999f;
