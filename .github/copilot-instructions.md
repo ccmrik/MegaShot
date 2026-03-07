@@ -88,9 +88,9 @@ BepInEx Harmony mod for Valheim that transforms crossbows into rapid-fire weapon
 - **4 quality levels** (vanilla max) with `m_maxQuality = 4`
 - **No ammo required** — `m_ammoType` cleared (Dundr normally uses Eitr; MegaShot uses neither bolts nor Eitr)
 - **Eitr drain blocked** — `m_attackEitr = 0` on prefab + manual `Player.UseEitr` Harmony prefix (safe if method doesn't exist)
-- **Per-level total damage** (based on Dundr): 240, 276, 312, 348
+- **Per-level total damage**: 25, 50, 75, 100
   - Split evenly across all enabled damage types (8 types: Pierce, Blunt, Slash, Fire, Frost, Lightning, Poison, Spirit)
-  - Encoded via `m_damages.m_lightning = 240` and `m_damagesPerLevel.m_lightning = 36` for native tooltip base
+  - Encoded via `m_damages.m_lightning = 25` and `m_damagesPerLevel.m_lightning = 25` for native tooltip base
   - Enforced via manual `GetDamage()` and `GetDamage(int, float)` Harmony postfixes that apply the split
   - `DamageMultiplier` config scales total at fire time (not in tooltip)
 - **Per-level recipes** with completely different ingredients per level (prefab ID in parens):
@@ -118,10 +118,10 @@ BepInEx Harmony mod for Valheim that transforms crossbows into rapid-fire weapon
 - **Try-catch protection**: `HandleZoom`, `FireBolt` body, and `UpdateHUD` are all wrapped in try-catch to prevent any single exception from killing the entire fire path
 
 ### 2. Damage System — Split Damage
-Per-level total damage (based on Dundr: 240/276/312/348) is the **total damage pool**, divided evenly across all **enabled** damage types, then scaled by `DamageMultiplier`:
-- Level 1, all 8 types enabled: `240 / 8 = 30` per type
-- Level 1, only Lightning enabled: `240 × 1 = 240` lightning
-- With DamageMultiplier=2, all 8 types: `2 × (240/8) = 60` per type
+Per-level total damage (25/50/75/100) is the **total damage pool**, divided evenly across all **enabled** damage types, then scaled by `DamageMultiplier`:
+- Level 1, all 8 types enabled: `25 / 8 = 3.125` per type
+- Level 1, only Lightning enabled: `25 × 1 = 25` lightning
+- With DamageMultiplier=2, all 8 types: `2 × (25/8) = 6.25` per type
 - Total damage always equals `perLevelDamage × DamageMultiplier` regardless of how many types are on
 - **Chop/Pickaxe** are zero unless Destroy Objects mode is active (then tagged with 999999)
 - `Stagger` scales weapon `m_attackForce` and `m_staggerMultiplier`

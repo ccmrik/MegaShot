@@ -22,8 +22,8 @@ namespace MegaCrossbows
         private static int currentRecipeLevel = -1;
 
         // Per-level total damage (index 0 = level 1, index 3 = level 4)
-        // Based on Dundr: 240, 276, 312, 348 — split evenly across all enabled damage types
-        public static readonly float[] TotalDamagePerLevel = { 240f, 276f, 312f, 348f };
+        // Split evenly across all enabled damage types, scaled by DamageMultiplier at fire time
+        public static readonly float[] TotalDamagePerLevel = { 25f, 50f, 75f, 100f };
 
         // Per-level recipe ingredient prefab names (all 5 each)
         private static readonly string[][] IngredientNames = new string[][]
@@ -202,7 +202,7 @@ namespace MegaCrossbows
                 baseDmg.m_lightning = TotalDamagePerLevel[0];
                 shared.m_damages = baseDmg;
                 var perLevelDmg = new HitData.DamageTypes();
-                perLevelDmg.m_lightning = 36f;
+                perLevelDmg.m_lightning = 25f;
                 shared.m_damagesPerLevel = perLevelDmg;
 
                 // Register in ObjectDB
