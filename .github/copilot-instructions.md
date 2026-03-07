@@ -79,8 +79,8 @@ BepInEx Harmony mod for Valheim that transforms crossbows into rapid-fire weapon
 
 ### 0. MegaShot Custom Crossbow (`MegaShotItem`)
 - **Only the MegaShot crossbow** gets all mod features (rapid fire, damage split, zoom, etc.)
-- **All other crossbows** (Ripper, Arbalest, etc.) function with vanilla Valheim behavior
-- Cloned from `CrossbowRipper` prefab at runtime in `ObjectDB.Awake`
+- **All other crossbows** (Ripper, Arbalest, Dundr, etc.) function with vanilla Valheim behavior
+- Cloned from `CrossbowDundr` prefab at runtime in `ObjectDB.Awake` (uses Dundr model and firing animation)
 - **Clone safety**: parented under an inactive container GO so `activeSelf=true` but `activeInHierarchy=false` — prevents `ZNetView.Awake()` from registering a live ZDO. When Valheim `Instantiate()`s from it, the copy is root-level and fully active. Only added to `m_namedPrefabs` dict (NOT `m_prefabs` list) to avoid NullRef in `ZNetScene.RemoveObjects`.
 - Registered in ObjectDB + ZNetScene (via reflection for private fields)
 - **ObjectDB registration**: After adding to `m_items`, calls `ObjectDB.UpdateRegisters()` via reflection to rebuild BOTH `m_itemByHash` (name hash → prefab) AND `m_itemByData` (SharedData → prefab). The `m_itemByData` map is critical — without it, Valheim can't resolve MegaShot items from save data during inventory loading.

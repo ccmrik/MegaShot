@@ -7,7 +7,7 @@ using System.Reflection;
 namespace MegaCrossbows
 {
     /// <summary>
-    /// Custom MegaShot crossbow — cloned from CrossbowRipper with 4 quality levels,
+    /// Custom MegaShot crossbow — cloned from CrossbowDundr with 4 quality levels,
     /// per-level damage, per-level upgrade recipes with different ingredients.
     /// </summary>
     public static class MegaShotItem
@@ -144,18 +144,18 @@ namespace MegaCrossbows
         {
             try
             {
-                // Find CrossbowRipper prefab
-                GameObject ripperPrefab = null;
+                // Find CrossbowDundr prefab
+                GameObject dundrPrefab = null;
                 foreach (var prefab in objectDB.m_items)
                 {
                     if (prefab == null) continue;
-                    if (prefab.name == "CrossbowRipper")
+                    if (prefab.name == "CrossbowDundr")
                     {
-                        ripperPrefab = prefab;
+                        dundrPrefab = prefab;
                         break;
                     }
                 }
-                if (ripperPrefab == null) return;
+                if (dundrPrefab == null) return;
 
                 // Inactive container pattern: parent the clone under an inactive root GO.
                 // The clone keeps activeSelf=true but activeInHierarchy=false,
@@ -169,7 +169,7 @@ namespace MegaCrossbows
                     UnityEngine.Object.DontDestroyOnLoad(prefabContainer);
                 }
 
-                megaShotPrefab = UnityEngine.Object.Instantiate(ripperPrefab, prefabContainer.transform);
+                megaShotPrefab = UnityEngine.Object.Instantiate(dundrPrefab, prefabContainer.transform);
                 megaShotPrefab.name = PrefabName;
 
                 // Modify item properties (GetComponent works on inactive-in-hierarchy objects)
