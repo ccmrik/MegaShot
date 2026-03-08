@@ -58,12 +58,6 @@ namespace MegaCrossbows
 
         // HouseFire
         public static ConfigEntry<bool> HouseFireEnabled;
-        public static ConfigEntry<float> HouseFireDamage;
-        public static ConfigEntry<float> HouseFireRadius;
-        public static ConfigEntry<float> HouseFireTickInterval;
-        public static ConfigEntry<int> HouseFireSpread;
-        public static ConfigEntry<float> HouseFireSmokeDieChance;
-        public static ConfigEntry<float> HouseFireMaxSmoke;
 
         private Harmony _harmony;
         private FileSystemWatcher _configWatcher;
@@ -152,18 +146,6 @@ namespace MegaCrossbows
             // HouseFire (ALT-mode fire spawned on impact)
             HouseFireEnabled = Config.Bind("7. HouseFire", "Enabled", true,
                 "Enable HouseFire spawning in ALT mode (set to false to disable fire on impact)");
-            HouseFireDamage = Config.Bind("7. HouseFire", "FireDamage", 10f,
-                new ConfigDescription("Fire damage per tick to buildings/creatures in radius (default: 10)", new AcceptableValueRange<float>(1f, 100f)));
-            HouseFireRadius = Config.Bind("7. HouseFire", "DotRadius", 1f,
-                new ConfigDescription("Radius of the fire's damage sphere (default: 1m)", new AcceptableValueRange<float>(1f, 10f)));
-            HouseFireTickInterval = Config.Bind("7. HouseFire", "TickInterval", 1f,
-                new ConfigDescription("Seconds between damage ticks (lower = faster burn, default: 1)", new AcceptableValueRange<float>(0.1f, 5f)));
-            HouseFireSpread = Config.Bind("7. HouseFire", "Spread", 4,
-                new ConfigDescription("Max fires allowed nearby — higher = more spread (default: 4)", new AcceptableValueRange<int>(1, 20)));
-            HouseFireSmokeDieChance = Config.Bind("7. HouseFire", "SmokeDieChance", 0.5f,
-                new ConfigDescription("Chance fire dies when suffocated by smoke (0 = immortal fire, 0.5 = default, 1 = always dies)", new AcceptableValueRange<float>(0f, 1f)));
-            HouseFireMaxSmoke = Config.Bind("7. HouseFire", "MaxSmoke", 3f,
-                new ConfigDescription("Smoke tolerance before fire can die (higher = survives longer in enclosed spaces, default: 3)", new AcceptableValueRange<float>(1f, 50f)));
 
             // Apply profile overrides
             ApplyProfileOverrides();

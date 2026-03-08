@@ -848,11 +848,11 @@ namespace MegaCrossbows
             float totalDamage = MegaShotItem.GetTotalDamage(weapon.m_quality);
             float overallMult = MegaCrossbowsPlugin.DamageMultiplier.Value;
 
-            // ALT-fire (destroy mode) doubles damage
+            // ALT-fire (destroy mode) quadruples damage
             bool destroyMode = MegaCrossbowsPlugin.DestroyObjects.Value &&
                 Input.GetKey(MegaCrossbowsPlugin.DestroyObjectsKey.Value);
             if (destroyMode)
-                overallMult *= 2f;
+                overallMult *= 4f;
 
             // Count enabled damage types
             bool pierce = MegaCrossbowsPlugin.DamagePierce.Value;
@@ -2175,7 +2175,6 @@ namespace MegaCrossbows
     {
         private static GameObject cachedFirePrefab;
         private static bool searchDone = false;
-        private static float cachedDotRadius = 1f;
 
         public static void SpawnFire(Vector3 position)
         {
@@ -2186,18 +2185,6 @@ namespace MegaCrossbows
                 if (cachedFirePrefab == null) return;
 
                 var go = UnityEngine.Object.Instantiate(cachedFirePrefab, position + Vector3.up * 0.1f, Quaternion.identity);
-
-                // Apply HouseFire config to the spawned Fire instance
-                var fire = go.GetComponent<Fire>();
-                if (fire != null)
-                {
-                    fire.m_fireDamage = MegaCrossbowsPlugin.HouseFireDamage.Value;
-                    fire.m_dotRadius = MegaCrossbowsPlugin.HouseFireRadius.Value;
-                    fire.m_dotInterval = MegaCrossbowsPlugin.HouseFireTickInterval.Value;
-                    fire.m_spread = MegaCrossbowsPlugin.HouseFireSpread.Value;
-                    fire.m_smokeDieChance = MegaCrossbowsPlugin.HouseFireSmokeDieChance.Value;
-                    fire.m_maxSmoke = MegaCrossbowsPlugin.HouseFireMaxSmoke.Value;
-                }
 
                 // Force m_burnable=true on nearby building pieces so Fire.Dot()
                 // damages stone, black marble, grausten, etc.
@@ -2210,7 +2197,7 @@ namespace MegaCrossbows
         {
             try
             {
-                float radius = Mathf.Max(MegaCrossbowsPlugin.HouseFireRadius.Value, MegaCrossbowsPlugin.AoeRadius.Value);
+                float radius = MegaCrossbowsPlugin.AoeRadius.Value;
                 int pieceMask = LayerMask.GetMask("piece", "piece_nonsolid");
                 Collider[] nearby = Physics.OverlapSphere(position, radius, pieceMask);
 
@@ -2283,13 +2270,6 @@ namespace MegaCrossbows
         private static void CacheFirePrefab(GameObject prefab)
         {
             cachedFirePrefab = prefab;
-            try
-            {
-                var fire = prefab.GetComponent<Fire>();
-                if (fire != null)
-                    cachedDotRadius = fire.m_dotRadius;
-            }
-            catch { }
         }
     }
 
