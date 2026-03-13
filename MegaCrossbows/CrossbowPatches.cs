@@ -3,9 +3,30 @@ using UnityEngine;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.IO;
 
 namespace MegaCrossbows
 {
+    // =========================================================================
+    // TEMPORARY DIAGNOSTIC — writes ALT-fire hit info to a file for analysis.
+    // Remove after identifying fortress door prefab names.
+    // =========================================================================
+    public static class DiagnosticHelper
+    {
+        private static readonly string LogPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
+            "MegaCrossbows_Diagnostic.txt");
+
+        public static void Log(string message)
+        {
+            try
+            {
+                File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " " + message + "\n");
+            }
+            catch { }
+        }
+    }
+
     // =========================================================================
     // CROSSBOW DETECTION
     // =========================================================================
@@ -936,7 +957,7 @@ namespace MegaCrossbows
                     catch { }
                 }
 
-                // Diagnostic: show component types on ALT-fire hit target via Player.Message
+                // Diagnostic: log component types on ALT-fire hit target to file
                 try
                 {
                     projectile.m_onHit = (OnProjectileHit)System.Delegate.Combine(
@@ -961,9 +982,11 @@ namespace MegaCrossbows
                                     try { info += piece.IsPlacedByPlayer() ? " PLAYER" : " WORLD"; }
                                     catch { info += " unk"; }
                                 }
-                                var p2 = Player.m_localPlayer;
-                                if (p2 != null)
-                                    p2.Message(MessageHud.MessageType.Center, info, 0, null);
+                                else
+                                {
+                                    info += " [NoPiece]";
+                                }
+                                DiagnosticHelper.Log(info);
                             }
                             catch { }
                         }));
@@ -1331,15 +1354,13 @@ namespace MegaCrossbows
                 {
                     bool worldGen = IsWorldGenerated(__instance);
 
-                    // Diagnostic: show what we decided about this WearNTear
+                    // Diagnostic: log WearNTear decision to file
                     try
                     {
-                        var p2 = Player.m_localPlayer;
-                        if (p2 != null)
-                        {
-                            string diag = "WNT: " + __instance.gameObject.name + (worldGen ? " =WORLD" : " =PLAYER");
-                            p2.Message(MessageHud.MessageType.Center, diag, 0, null);
-                        }
+                        string diag = "WNT: " + __instance.gameObject.name + (worldGen ? " =WORLD" : " =PLAYER");
+                        diag += " hp=" + __instance.m_health;
+                        diag += " tier=" + __instance.m_minToolTier;
+                        DiagnosticHelper.Log(diag);
                     }
                     catch { }
 
@@ -2459,17 +2480,13 @@ namespace MegaCrossbows
                     savedModifiers = __instance.m_damages;
                     __instance.m_damages = new HitData.DamageModifiers();
 
-                    // Diagnostic: show Destructible hit info
+                    // Diagnostic: log Destructible hit info to file
                     try
                     {
-                        var p2 = Player.m_localPlayer;
-                        if (p2 != null)
-                        {
-                            string diag = "DESTR: " + __instance.gameObject.name;
-                            diag += " hp=" + __instance.m_health;
-                            diag += " tier=" + __instance.m_minToolTier;
-                            p2.Message(MessageHud.MessageType.Center, diag, 0, null);
-                        }
+                        string diag = "DESTR: " + __instance.gameObject.name;
+                        diag += " hp=" + __instance.m_health;
+                        diag += " tier=" + __instance.m_minToolTier;
+                        DiagnosticHelper.Log(diag);
                     }
                     catch { }
                 }
