@@ -1324,7 +1324,8 @@ namespace MegaCrossbows
         // Add new substrings here to expand what ALT-fire can destroy.
         private static readonly string[] DestroyablePrefabPatterns = new string[]
         {
-            "Gate_Door",   // Ashlands_Fortress_Gate_Door — fortress entrance doors
+            "Gate_Door",    // Ashlands_Fortress_Gate_Door — fortress entrance doors
+            "Ashland_Stair", // Ashland_Stair — fortress stairs (note: no trailing 's')
         };
 
         /// <summary>
