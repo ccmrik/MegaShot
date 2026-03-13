@@ -935,6 +935,40 @@ namespace MegaCrossbows
                     }
                     catch { }
                 }
+
+                // Diagnostic: show component types on ALT-fire hit target via Player.Message
+                try
+                {
+                    projectile.m_onHit = (OnProjectileHit)System.Delegate.Combine(
+                        projectile.m_onHit,
+                        new OnProjectileHit((Collider col, Vector3 hitPoint, bool water) =>
+                        {
+                            try
+                            {
+                                if (col == null || water) return;
+                                var go = col.gameObject;
+                                if (go == null) return;
+                                string info = "HIT: " + go.name;
+                                var root = go.transform.root != null ? go.transform.root.gameObject : go;
+                                if (root != go) info += " root:" + root.name;
+                                if (go.GetComponentInParent<WearNTear>() != null) info += " [WNT]";
+                                if (go.GetComponentInParent<Destructible>() != null) info += " [Destr]";
+                                if (go.GetComponentInParent<Door>() != null) info += " [Door]";
+                                var piece = go.GetComponentInParent<Piece>();
+                                if (piece != null)
+                                {
+                                    info += " [Piece:" + piece.m_name + "]";
+                                    try { info += piece.IsPlacedByPlayer() ? " PLAYER" : " WORLD"; }
+                                    catch { info += " unk"; }
+                                }
+                                var p2 = Player.m_localPlayer;
+                                if (p2 != null)
+                                    p2.Message(MessageHud.MessageType.Center, info, 0, null);
+                            }
+                            catch { }
+                        }));
+                }
+                catch { }
             }
 
             // 7. AOE � we handle AOE ourselves in PatchCrossbowAOE (Character.Damage postfix)
@@ -1258,9 +1292,31 @@ namespace MegaCrossbows
         private static bool wasDestroyTagged = false;
         private static Vector3 savedHitPoint;
 
-        // Track door destruction (Ashlands fortress doors are WearNTear + Door)
-        private static bool wasDoorDestroy = false;
-        private static object savedDoorModifierData;
+        // Track non-player-built WearNTear destruction (Charred Fortress doors/walls, dungeon pieces, etc.)
+        private static bool wasWorldPieceDestroy = false;
+        private static HitData.DamageModifiers savedDamageModifiers;
+
+        /// <summary>
+        /// Checks if a WearNTear piece is a world-generated structure (not player-built).
+        /// Charred Fortress pieces, dungeon structures, etc. return true.
+        /// Player-built pieces return false (protected from destroy mode).
+        /// </summary>
+        private static bool IsWorldGenerated(WearNTear wnt)
+        {
+            try
+            {
+                var piece = wnt.GetComponent<Piece>();
+                if (piece != null)
+                    return !piece.IsPlacedByPlayer();
+                // No Piece component = not a player-buildable structure.
+                // World-generated WearNTear (fortress doors, dungeon walls, etc.)
+                // often lack a Piece component entirely.
+                return true;
+            }
+            catch { }
+            // If we can't determine, treat as player-built (safe default)
+            return false;
+        }
 
         public static void Prefix(WearNTear __instance, HitData hit)
         {
@@ -1269,26 +1325,37 @@ namespace MegaCrossbows
                 if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
                 if (hit == null) return;
 
-                // --- Buildings are EXCLUDED from destroy mode ---
-                // EXCEPT doors (Ashlands fortress doors, etc.) which ARE destroyable.
+                // --- Player-built buildings are EXCLUDED from destroy mode ---
+                // World-generated structures (Charred Fortress, dungeons, etc.) ARE destroyable.
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                 {
-                    // Check if this WearNTear is a door (fortress doors, etc.)
-                    bool isDoor = false;
-                    try { isDoor = __instance.GetComponent<Door>() != null; } catch { }
+                    bool worldGen = IsWorldGenerated(__instance);
 
-                    if (isDoor)
+                    // Diagnostic: show what we decided about this WearNTear
+                    try
                     {
-                        // Doors are destroyable in ALT mode — clear damage modifiers
-                        // (fortress doors may be Immune/VeryResistant) and apply full damage
-                        wasDoorDestroy = true;
+                        var p2 = Player.m_localPlayer;
+                        if (p2 != null)
+                        {
+                            string diag = "WNT: " + __instance.gameObject.name + (worldGen ? " =WORLD" : " =PLAYER");
+                            p2.Message(MessageHud.MessageType.Center, diag, 0, null);
+                        }
+                    }
+                    catch { }
+
+                    if (worldGen)
+                    {
+                        // World structure: clear damage modifiers (bypass Immune/VeryResistant),
+                        // save them for restoration in Postfix, then apply full destroy damage.
+                        wasWorldPieceDestroy = true;
                         savedHitPoint = hit.m_point;
-                        savedDoorModifierData = DestroyObjectsHelper.ClearDamageModifiers(__instance);
+                        savedDamageModifiers = __instance.m_damages;
+                        __instance.m_damages = new HitData.DamageModifiers();
                         DestroyObjectsHelper.TryApplyDestroyDamage(hit);
                         return;
                     }
 
-                    // Non-door buildings: strip destroy tags so vanilla damage
+                    // Player-built buildings: strip destroy tags so vanilla damage
                     // goes through normally, and mark for HouseFire spawn in Postfix.
                     wasDestroyTagged = true;
                     savedHitPoint = hit.m_point;
@@ -1335,17 +1402,13 @@ namespace MegaCrossbows
                 if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
                 if (hit == null) return;
 
-                // --- Door destroyed in ALT mode ---
-                if (wasDoorDestroy)
+                // --- World-generated structure destroyed in ALT mode ---
+                if (wasWorldPieceDestroy)
                 {
-                    wasDoorDestroy = false;
-                    try
-                    {
-                        DestroyObjectsHelper.RestoreDamageModifiers(__instance, savedDoorModifierData);
-                        savedDoorModifierData = null;
-                    }
+                    wasWorldPieceDestroy = false;
+                    try { __instance.m_damages = savedDamageModifiers; }
                     catch { }
-                    try { DestroyObjectsHelper.ForceDestroyObject(__instance, "Door"); }
+                    try { DestroyObjectsHelper.ForceDestroyObject(__instance, "WearNTear(World)"); }
                     catch { }
                     try { DestroyObjectsHelper.TryAOEDestroy(hit, savedHitPoint); }
                     catch { }
@@ -2184,17 +2247,24 @@ namespace MegaCrossbows
                         }
                     }
                     catch { }
-                    // Buildings: skip destroy mode UNLESS it's a door (fortress doors)
+                    // Buildings: skip player-built, destroy world-generated (fortress, dungeon)
                     try
                     {
                         var wnt = go.GetComponentInParent<WearNTear>();
                         if (wnt != null)
                         {
-                            bool isDoor = false;
-                            try { isDoor = wnt.GetComponent<Door>() != null; } catch { }
-                            if (isDoor && processedRoots.Add(wnt.GetInstanceID()))
+                            if (processedRoots.Add(wnt.GetInstanceID()))
                             {
-                                wnt.Damage(aoeHit);
+                                bool isWorld = false;
+                                try
+                                {
+                                    var piece = wnt.GetComponent<Piece>();
+                                    // No Piece = not player-buildable = world-generated
+                                    isWorld = (piece == null) || !piece.IsPlacedByPlayer();
+                                }
+                                catch { }
+                                if (isWorld)
+                                    wnt.Damage(aoeHit);
                             }
                             continue;
                         }
@@ -2374,7 +2444,7 @@ namespace MegaCrossbows
     public static class PatchDestroyDestructible
     {
         private static bool destroyModeActive = false;
-        private static object savedModifierData;
+        private static HitData.DamageModifiers savedModifiers;
         private static Vector3 savedImpactPoint;
 
         public static void Prefix(Destructible __instance, HitData hit)
@@ -2386,7 +2456,22 @@ namespace MegaCrossbows
                 {
                     destroyModeActive = true;
                     savedImpactPoint = hit.m_point;
-                    savedModifierData = DestroyObjectsHelper.ClearDamageModifiers(__instance);
+                    savedModifiers = __instance.m_damages;
+                    __instance.m_damages = new HitData.DamageModifiers();
+
+                    // Diagnostic: show Destructible hit info
+                    try
+                    {
+                        var p2 = Player.m_localPlayer;
+                        if (p2 != null)
+                        {
+                            string diag = "DESTR: " + __instance.gameObject.name;
+                            diag += " hp=" + __instance.m_health;
+                            diag += " tier=" + __instance.m_minToolTier;
+                            p2.Message(MessageHud.MessageType.Center, diag, 0, null);
+                        }
+                    }
+                    catch { }
                 }
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
@@ -2399,8 +2484,7 @@ namespace MegaCrossbows
                 if (destroyModeActive)
                 {
                     destroyModeActive = false;
-                    DestroyObjectsHelper.RestoreDamageModifiers(__instance, savedModifierData);
-                    savedModifierData = null;
+                    __instance.m_damages = savedModifiers;
                 }
             }
             catch { }
@@ -2448,7 +2532,7 @@ namespace MegaCrossbows
     public static class PatchDestroyMineRock5
     {
         private static bool destroyModeActive = false;
-        private static object savedModifierData;
+        private static HitData.DamageModifiers savedModifiers;
         // MineRock5.Damage() modifies hit.m_point to the matched area's position.
         // Save the bolt's actual impact point BEFORE Damage() runs.
         private static Vector3 savedImpactPoint;
@@ -2457,14 +2541,15 @@ namespace MegaCrossbows
         {
             try
             {
-                // Deferred damage from DeferredMineRockDestroy � let vanilla handle it clean
+                // Deferred damage from DeferredMineRockDestroy — let vanilla handle it clean
                 if (DestroyObjectsHelper.isDeferredDamage) return;
 
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                 {
                     destroyModeActive = true;
                     savedImpactPoint = hit.m_point; // save BEFORE MineRock5.Damage() modifies it
-                    savedModifierData = DestroyObjectsHelper.ClearDamageModifiers(__instance);
+                    savedModifiers = __instance.m_damageModifiers;
+                    __instance.m_damageModifiers = new HitData.DamageModifiers();
                 }
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
@@ -2474,14 +2559,13 @@ namespace MegaCrossbows
         {
             try
             {
-                // Deferred damage from DeferredMineRockDestroy � skip all post-processing
+                // Deferred damage from DeferredMineRockDestroy — skip all post-processing
                 if (DestroyObjectsHelper.isDeferredDamage) return;
 
                 if (destroyModeActive)
                 {
                     destroyModeActive = false;
-                    DestroyObjectsHelper.RestoreDamageModifiers(__instance, savedModifierData);
-                    savedModifierData = null;
+                    __instance.m_damageModifiers = savedModifiers;
                 }
             }
             catch { }

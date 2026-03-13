@@ -141,8 +141,9 @@ Two-layer approach for reliable DoT:
 - Recursion guard: `isApplyingAOE` flag prevents infinite recursion
 - Patched types: `TreeBase`, `TreeLog`, `Destructible`, `MineRock`, `MineRock5`
 - **Trees/Logs**: `ForceDestroyIfNeeded` is SKIPPED — the 999999 damage kills them through Valheim's normal death path so the full sequence plays (fall → log → split → wood drops)
-- **Buildings (`WearNTear`) are EXCLUDED** from destroy mode — they are never instant-destroyed
-- **EXCEPTION: Doors** (`WearNTear` + `Door` component) ARE destroyable in ALT mode — Ashlands fortress doors, dungeon doors, etc. Damage modifiers are cleared (bypass Immune/VeryResistant), full 999999 damage applied, then force-destroyed via ZNetView. AOE also destroys nearby doors.
+- **Player-built buildings (`WearNTear`)** are EXCLUDED from destroy mode — they are never instant-destroyed
+- **World-generated structures** (`WearNTear` without player creator — Charred Fortress, dungeons, etc.) ARE destroyable in ALT mode. Detected via `Piece.IsPlacedByPlayer()`. Damage modifiers saved, cleared to Normal (bypass Immune/VeryResistant), full 999999 damage applied, then force-destroyed via ZNetView. Modifiers restored in Postfix. AOE also destroys nearby world structures.
+- **Damage modifier clearing**: `HitData.DamageModifiers` is a **struct** (not a list). All destroy patches (`Destructible`, `MineRock5`, `WearNTear`) save the struct, assign a fresh default struct (all `Normal`), then restore in Postfix. The old `ClearDamageModifiers` reflection-based IList approach is dead code — struct fields are accessed directly.
 - Ashlands cliffs (`cliff_ashlands*` on `static_solid` layer) are static terrain — NOT destroyable
 
 ### 5. HouseFire (`HouseFireHelper`)
