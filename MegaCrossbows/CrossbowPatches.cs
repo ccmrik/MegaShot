@@ -8,8 +8,9 @@ using System.IO;
 namespace MegaCrossbows
 {
     // =========================================================================
-    // TEMPORARY DIAGNOSTIC — writes ALT-fire hit info to a file for analysis.
-    // Remove after identifying fortress door prefab names.
+    // DIAGNOSTIC — writes ALT-fire hit info to Desktop\MegaCrossbows_Diagnostic.txt.
+    // Controlled by config: 8. Diagnostic > Enabled (default: off).
+    // Shows prefab names, component types, HP, tier for identifying fortress pieces.
     // =========================================================================
     public static class DiagnosticHelper
     {
@@ -21,6 +22,7 @@ namespace MegaCrossbows
         {
             try
             {
+                if (!MegaCrossbowsPlugin.DiagnosticMode.Value) return;
                 File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " " + message + "\n");
             }
             catch { }
@@ -1324,8 +1326,9 @@ namespace MegaCrossbows
         // Add new substrings here to expand what ALT-fire can destroy.
         private static readonly string[] DestroyablePrefabPatterns = new string[]
         {
-            "Gate_Door",    // Ashlands_Fortress_Gate_Door — fortress entrance doors
-            "Ashland_Stair", // Ashland_Stair — fortress stairs (note: no trailing 's')
+            "Gate_Door",             // Ashlands_Fortress_Gate_Door — fortress entrance doors
+            "Ashland_Stair",         // Ashland_Stair — fortress stairs (note: no trailing 's')
+            "Ashlands_Wall_2x2_top", // Ashlands_Wall_2x2_top — upper wall section (stair foundation)
         };
 
         /// <summary>

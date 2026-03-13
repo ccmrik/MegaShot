@@ -259,6 +259,11 @@ Config auto-reloads on save (FileSystemWatcher).
 |---|---|---|---|---|
 | `Enabled` | bool | `true` | — | Enable/disable HouseFire spawning in ALT mode |
 
+### 8. Diagnostic
+| Key | Type | Default | Range | Description |
+|---|---|---|---|---|
+| `Enabled` | bool | `false` | — | Write ALT-fire hit diagnostics to `Desktop\MegaCrossbows_Diagnostic.txt` (prefab names, component types, HP, tier) |
+
 ---
 
 ## Harmony Patches (all in CrossbowPatches.cs)

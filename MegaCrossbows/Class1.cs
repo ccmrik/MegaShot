@@ -59,6 +59,9 @@ namespace MegaCrossbows
         // HouseFire
         public static ConfigEntry<bool> HouseFireEnabled;
 
+        // Diagnostic
+        public static ConfigEntry<bool> DiagnosticMode;
+
         private Harmony _harmony;
         private FileSystemWatcher _configWatcher;
 
@@ -146,6 +149,10 @@ namespace MegaCrossbows
             // HouseFire (ALT-mode fire spawned on impact)
             HouseFireEnabled = Config.Bind("7. HouseFire", "Enabled", true,
                 "Enable HouseFire spawning in ALT mode (set to false to disable fire on impact)");
+
+            // Diagnostic
+            DiagnosticMode = Config.Bind("8. Diagnostic", "Enabled", false,
+                "Write ALT-fire hit diagnostics to Desktop\\MegaCrossbows_Diagnostic.txt (prefab names, component types, HP, tier)");
 
             // Apply profile overrides
             ApplyProfileOverrides();
