@@ -1258,6 +1258,10 @@ namespace MegaCrossbows
         private static bool wasDestroyTagged = false;
         private static Vector3 savedHitPoint;
 
+        // Track door destruction (Ashlands fortress doors are WearNTear + Door)
+        private static bool wasDoorDestroy = false;
+        private static object savedDoorModifierData;
+
         public static void Prefix(WearNTear __instance, HitData hit)
         {
             try
@@ -1266,10 +1270,26 @@ namespace MegaCrossbows
                 if (hit == null) return;
 
                 // --- Buildings are EXCLUDED from destroy mode ---
-                // Instead of destroying, strip the destroy tags so vanilla damage
-                // goes through normally, and mark for HouseFire spawn in Postfix.
+                // EXCEPT doors (Ashlands fortress doors, etc.) which ARE destroyable.
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                 {
+                    // Check if this WearNTear is a door (fortress doors, etc.)
+                    bool isDoor = false;
+                    try { isDoor = __instance.GetComponent<Door>() != null; } catch { }
+
+                    if (isDoor)
+                    {
+                        // Doors are destroyable in ALT mode — clear damage modifiers
+                        // (fortress doors may be Immune/VeryResistant) and apply full damage
+                        wasDoorDestroy = true;
+                        savedHitPoint = hit.m_point;
+                        savedDoorModifierData = DestroyObjectsHelper.ClearDamageModifiers(__instance);
+                        DestroyObjectsHelper.TryApplyDestroyDamage(hit);
+                        return;
+                    }
+
+                    // Non-door buildings: strip destroy tags so vanilla damage
+                    // goes through normally, and mark for HouseFire spawn in Postfix.
                     wasDestroyTagged = true;
                     savedHitPoint = hit.m_point;
                     // Strip destroy-level damage so the building takes normal hit
@@ -1314,6 +1334,23 @@ namespace MegaCrossbows
             {
                 if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
                 if (hit == null) return;
+
+                // --- Door destroyed in ALT mode ---
+                if (wasDoorDestroy)
+                {
+                    wasDoorDestroy = false;
+                    try
+                    {
+                        DestroyObjectsHelper.RestoreDamageModifiers(__instance, savedDoorModifierData);
+                        savedDoorModifierData = null;
+                    }
+                    catch { }
+                    try { DestroyObjectsHelper.ForceDestroyObject(__instance, "Door"); }
+                    catch { }
+                    try { DestroyObjectsHelper.TryAOEDestroy(hit, savedHitPoint); }
+                    catch { }
+                    return;
+                }
 
                 // --- Destroy-tagged bolt hit a building: handled by Projectile.m_onHit ---
                 if (wasDestroyTagged)
@@ -2147,11 +2184,20 @@ namespace MegaCrossbows
                         }
                     }
                     catch { }
-                    // Buildings: skip destroy mode (excluded from instant-destroy)
+                    // Buildings: skip destroy mode UNLESS it's a door (fortress doors)
                     try
                     {
                         var wnt = go.GetComponentInParent<WearNTear>();
-                        if (wnt != null) continue;
+                        if (wnt != null)
+                        {
+                            bool isDoor = false;
+                            try { isDoor = wnt.GetComponent<Door>() != null; } catch { }
+                            if (isDoor && processedRoots.Add(wnt.GetInstanceID()))
+                            {
+                                wnt.Damage(aoeHit);
+                            }
+                            continue;
+                        }
                     }
                     catch { }
                 }

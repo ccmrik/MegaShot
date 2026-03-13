@@ -142,6 +142,7 @@ Two-layer approach for reliable DoT:
 - Patched types: `TreeBase`, `TreeLog`, `Destructible`, `MineRock`, `MineRock5`
 - **Trees/Logs**: `ForceDestroyIfNeeded` is SKIPPED — the 999999 damage kills them through Valheim's normal death path so the full sequence plays (fall → log → split → wood drops)
 - **Buildings (`WearNTear`) are EXCLUDED** from destroy mode — they are never instant-destroyed
+- **EXCEPTION: Doors** (`WearNTear` + `Door` component) ARE destroyable in ALT mode — Ashlands fortress doors, dungeon doors, etc. Damage modifiers are cleared (bypass Immune/VeryResistant), full 999999 damage applied, then force-destroyed via ZNetView. AOE also destroys nearby doors.
 - Ashlands cliffs (`cliff_ashlands*` on `static_solid` layer) are static terrain — NOT destroyable
 
 ### 5. HouseFire (`HouseFireHelper`)

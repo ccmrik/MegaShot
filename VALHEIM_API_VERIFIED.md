@@ -248,6 +248,10 @@ if (ammoItem != null && ammoItem.m_shared.m_attack.m_attackProjectile != null)
 **Verified NOT accessible (requires reflection):**
 - ? `ZNetScene.m_namedPrefabs` — Not a public field (use reflection)
 
+### Door Class
+**Needs verification (wrapped in try-catch):**
+- ?? `Door` — Component on Ashlands fortress doors (and other interactable doors). Fortress doors are `WearNTear` + `Door`. Used via `GetComponent<Door>()` to distinguish destroyable doors from regular building pieces in ALT-fire destroy mode.
+
 ---
 
 This document is based on actual testing and verified working code from MegaCrossbows v2.9.1.
