@@ -1315,29 +1315,41 @@ namespace MegaCrossbows
         private static bool wasDestroyTagged = false;
         private static Vector3 savedHitPoint;
 
-        // Track non-player-built WearNTear destruction (Charred Fortress doors/walls, dungeon pieces, etc.)
+        // Track destroyable world-piece destruction (fortress doors, stairs, etc.)
         private static bool wasWorldPieceDestroy = false;
         private static HitData.DamageModifiers savedDamageModifiers;
 
+        // Prefab name substrings that are destroyable in ALT mode.
+        // Only specific fortress pieces — NOT walls, floors, or structural elements.
+        // Add new substrings here to expand what ALT-fire can destroy.
+        private static readonly string[] DestroyablePrefabPatterns = new string[]
+        {
+            "Gate_Door",   // Ashlands_Fortress_Gate_Door — fortress entrance doors
+        };
+
         /// <summary>
-        /// Checks if a WearNTear piece is a world-generated structure (not player-built).
-        /// Charred Fortress pieces, dungeon structures, etc. return true.
-        /// Player-built pieces return false (protected from destroy mode).
+        /// Checks if a WearNTear piece is a specific destroyable world piece
+        /// (fortress doors, stairs, etc.) rather than a generic wall/floor.
+        /// Only pieces whose prefab name contains one of the allowed patterns are destroyable.
+        /// Player-built pieces are always protected.
         /// </summary>
-        private static bool IsWorldGenerated(WearNTear wnt)
+        public static bool IsDestroyableWorldPiece(WearNTear wnt)
         {
             try
             {
+                // Player-built pieces are never destroyable
                 var piece = wnt.GetComponent<Piece>();
-                if (piece != null)
-                    return !piece.IsPlacedByPlayer();
-                // No Piece component = not a player-buildable structure.
-                // World-generated WearNTear (fortress doors, dungeon walls, etc.)
-                // often lack a Piece component entirely.
-                return true;
+                if (piece != null && piece.IsPlacedByPlayer())
+                    return false;
+
+                string goName = wnt.gameObject.name;
+                for (int i = 0; i < DestroyablePrefabPatterns.Length; i++)
+                {
+                    if (goName.IndexOf(DestroyablePrefabPatterns[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
             }
             catch { }
-            // If we can't determine, treat as player-built (safe default)
             return false;
         }
 
@@ -1352,19 +1364,19 @@ namespace MegaCrossbows
                 // World-generated structures (Charred Fortress, dungeons, etc.) ARE destroyable.
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                 {
-                    bool worldGen = IsWorldGenerated(__instance);
+                    bool canDestroy = IsDestroyableWorldPiece(__instance);
 
                     // Diagnostic: log WearNTear decision to file
                     try
                     {
-                        string diag = "WNT: " + __instance.gameObject.name + (worldGen ? " =WORLD" : " =PLAYER");
+                        string diag = "WNT: " + __instance.gameObject.name + (canDestroy ? " =DESTROY" : " =SKIP");
                         diag += " hp=" + __instance.m_health;
                         diag += " tier=" + __instance.m_minToolTier;
                         DiagnosticHelper.Log(diag);
                     }
                     catch { }
 
-                    if (worldGen)
+                    if (canDestroy)
                     {
                         // World structure: clear damage modifiers (bypass Immune/VeryResistant),
                         // save them for restoration in Postfix, then apply full destroy damage.
@@ -2268,7 +2280,7 @@ namespace MegaCrossbows
                         }
                     }
                     catch { }
-                    // Buildings: skip player-built, destroy world-generated (fortress, dungeon)
+                    // Buildings: only destroy specific world pieces (doors, stairs) in AOE
                     try
                     {
                         var wnt = go.GetComponentInParent<WearNTear>();
@@ -2276,15 +2288,7 @@ namespace MegaCrossbows
                         {
                             if (processedRoots.Add(wnt.GetInstanceID()))
                             {
-                                bool isWorld = false;
-                                try
-                                {
-                                    var piece = wnt.GetComponent<Piece>();
-                                    // No Piece = not player-buildable = world-generated
-                                    isWorld = (piece == null) || !piece.IsPlacedByPlayer();
-                                }
-                                catch { }
-                                if (isWorld)
+                                if (PatchBuildingDamage.IsDestroyableWorldPiece(wnt))
                                     wnt.Damage(aoeHit);
                             }
                             continue;
