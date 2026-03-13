@@ -1324,12 +1324,13 @@ namespace MegaCrossbows
         // Prefab name substrings that are destroyable in ALT mode.
         // Only specific fortress pieces — NOT floors or main structural elements.
         // Add new substrings here to expand what ALT-fire can destroy.
+        // NOTE: order matters — longer/more-specific patterns must come BEFORE shorter ones
+        // to avoid substring false positives (e.g. "Wall_2x2_top" before "Wall_2x2").
         private static readonly string[] DestroyablePrefabPatterns = new string[]
         {
             "Gate_Door",             // Ashlands_Fortress_Gate_Door — fortress entrance doors
             "Ashland_Stair",         // Ashland_Stair — fortress stairs (note: no trailing 's')
             "Ashlands_Wall_2x2_top", // Ashlands_Wall_2x2_top — upper wall section (stair foundation)
-            "Ashlands_Wall_2x2",     // Ashlands_Wall_2x2 — base wall section (stair foundation)
         };
 
         /// <summary>
