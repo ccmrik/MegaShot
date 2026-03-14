@@ -5,10 +5,10 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.IO;
 
-namespace MegaCrossbows
+namespace MegaShot
 {
     // =========================================================================
-    // DIAGNOSTIC — writes ALT-fire hit info to Desktop\MegaCrossbows_Diagnostic.txt.
+    // DIAGNOSTIC — writes ALT-fire hit info to Desktop\MegaShot_Diagnostic.txt.
     // Controlled by config: 8. Diagnostic > Enabled (default: off).
     // Shows prefab names, component types, HP, tier for identifying fortress pieces.
     // =========================================================================
@@ -16,13 +16,13 @@ namespace MegaCrossbows
     {
         private static readonly string LogPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            "MegaCrossbows_Diagnostic.txt");
+            "MegaShot_Diagnostic.txt");
 
         public static void Log(string message)
         {
             try
             {
-                if (!MegaCrossbowsPlugin.DiagnosticMode.Value) return;
+                if (!MegaShotPlugin.DiagnosticMode.Value) return;
                 File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " " + message + "\n");
             }
             catch { }
@@ -257,7 +257,7 @@ namespace MegaCrossbows
     {
         public static bool Prefix(Player __instance, float v)
         {
-            if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+            if (!MegaShotPlugin.ModEnabled.Value) return true;
             if (__instance != Player.m_localPlayer) return true;
             var weapon = __instance.GetCurrentWeapon();
             if (weapon != null && CrossbowHelper.IsCrossbow(weapon) && v > 0f)
@@ -274,7 +274,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 if (__instance != Player.m_localPlayer) return true;
                 var weapon = __instance.GetCurrentWeapon();
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon))
@@ -293,7 +293,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 if (__instance != Player.m_localPlayer) return true;
                 var weapon = __instance.GetCurrentWeapon();
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon) && v > 0f)
@@ -314,7 +314,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 if (__instance != Player.m_localPlayer) return true;
                 var weapon = __instance.GetCurrentWeapon();
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon))
@@ -333,7 +333,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 if (__instance != Player.m_localPlayer) return true;
                 var weapon = __instance.GetCurrentWeapon();
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon))
@@ -357,7 +357,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 if (CrossbowHelper.IsCrossbow(__instance))
                 {
                     __result = 9999999f;
@@ -374,7 +374,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 if (CrossbowHelper.IsCrossbow(__instance))
                 {
                     __result = 1f;
@@ -398,7 +398,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 var player = Player.m_localPlayer;
                 if (player == null) return true;
                 var weapon = player.GetCurrentWeapon();
@@ -422,7 +422,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
                 var player = Player.m_localPlayer;
                 if (player == null) return true;
                 var weapon = player.GetCurrentWeapon();
@@ -486,7 +486,7 @@ namespace MegaCrossbows
             if (!states.ContainsKey(id))
             {
                 var s = new CrossbowState();
-                s.magazineAmmo = MegaCrossbowsPlugin.MagazineCapacity.Value;
+                s.magazineAmmo = MegaShotPlugin.MagazineCapacity.Value;
                 states[id] = s;
             }
             return states[id];
@@ -545,7 +545,7 @@ namespace MegaCrossbows
 
         public static void Postfix(Player __instance)
         {
-            if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+            if (!MegaShotPlugin.ModEnabled.Value) return;
             if (__instance != Player.m_localPlayer) return;
 
             // Update MegaShot recipe (needs to run even when not holding crossbow)
@@ -608,7 +608,7 @@ namespace MegaCrossbows
                 if (Time.time - state.reloadStartTime >= 2f)
                 {
                     state.isReloading = false;
-                    state.magazineAmmo = MegaCrossbowsPlugin.MagazineCapacity.Value;
+                    state.magazineAmmo = MegaShotPlugin.MagazineCapacity.Value;
                     __instance.Message(MessageHud.MessageType.Center, "<color=green>RELOADED</color>");
                 }
                 try { UpdateHUD(__instance, state); } catch { }
@@ -618,8 +618,8 @@ namespace MegaCrossbows
             // === FIRE ===
             // Destroy mode (Alt held): semi-auto, one bolt per click
             // Normal mode: full-auto while held at configured fire rate
-            bool destroyMode = MegaCrossbowsPlugin.DestroyObjects.Value &&
-                Input.GetKey(MegaCrossbowsPlugin.DestroyObjectsKey.Value);
+            bool destroyMode = MegaShotPlugin.DestroyObjects.Value &&
+                Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value);
             bool fireInput = destroyMode ? Input.GetMouseButtonDown(0) : Input.GetMouseButton(0);
 
             if (fireInput)
@@ -638,7 +638,7 @@ namespace MegaCrossbows
                 }
                 else
                 {
-                    float interval = 1f / MegaCrossbowsPlugin.GetEffectiveFireRate();
+                    float interval = 1f / MegaShotPlugin.GetEffectiveFireRate();
                     if (Time.time - lastFireTime >= interval)
                     {
                         // Additive timing to prevent drift, cap to prevent burst after pause
@@ -723,7 +723,7 @@ namespace MegaCrossbows
                     savedMinDistance = GetCamFloat(camMinDistField, 1f);
                     savedMaxDistance = GetCamFloat(camMaxDistField, 6f);
                     zooming = true;
-                    zoomLevel = MegaCrossbowsPlugin.ZoomMin.Value;
+                    zoomLevel = MegaShotPlugin.ZoomMin.Value;
                     HidePlayerModel();
                 }
 
@@ -733,8 +733,8 @@ namespace MegaCrossbows
                 {
                     zoomLevel = Mathf.Clamp(
                         zoomLevel + scroll * 3f,
-                        MegaCrossbowsPlugin.ZoomMin.Value,
-                        MegaCrossbowsPlugin.ZoomMax.Value
+                        MegaShotPlugin.ZoomMin.Value,
+                        MegaShotPlugin.ZoomMax.Value
                     );
                 }
 
@@ -861,7 +861,7 @@ namespace MegaCrossbows
             // 4. Velocity
             var attack = weapon.m_shared?.m_attack;
             if (attack == null) { UnityEngine.Object.Destroy(proj); return; }
-            float speed = attack.m_projectileVel * (MegaCrossbowsPlugin.GetEffectiveVelocity() / 100f);
+            float speed = attack.m_projectileVel * (MegaShotPlugin.GetEffectiveVelocity() / 100f);
             Vector3 velocity = aimDir * speed;
 
             // 5. Damage — Split system (no ammo, weapon-only)
@@ -869,23 +869,23 @@ namespace MegaCrossbows
             // scaled by DamageMultiplier. e.g. Level 1 (240), all 8 types, mult 2: 2*(240/8) = 60 per type.
             HitData hitData = new HitData();
             float totalDamage = MegaShotItem.GetTotalDamage(weapon.m_quality);
-            float overallMult = MegaCrossbowsPlugin.DamageMultiplier.Value;
+            float overallMult = MegaShotPlugin.DamageMultiplier.Value;
 
             // ALT-fire (destroy mode) quadruples damage
-            bool destroyMode = MegaCrossbowsPlugin.DestroyObjects.Value &&
-                Input.GetKey(MegaCrossbowsPlugin.DestroyObjectsKey.Value);
+            bool destroyMode = MegaShotPlugin.DestroyObjects.Value &&
+                Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value);
             if (destroyMode)
                 overallMult *= 4f;
 
             // Count enabled damage types
-            bool pierce = MegaCrossbowsPlugin.DamagePierce.Value;
-            bool blunt = MegaCrossbowsPlugin.DamageBlunt.Value;
-            bool slash = MegaCrossbowsPlugin.DamageSlash.Value;
-            bool fire = MegaCrossbowsPlugin.DamageFire.Value;
-            bool frost = MegaCrossbowsPlugin.DamageFrost.Value;
-            bool lightning = MegaCrossbowsPlugin.DamageLightning.Value;
-            bool poison = MegaCrossbowsPlugin.DamagePoison.Value;
-            bool spirit = MegaCrossbowsPlugin.DamageSpirit.Value;
+            bool pierce = MegaShotPlugin.DamagePierce.Value;
+            bool blunt = MegaShotPlugin.DamageBlunt.Value;
+            bool slash = MegaShotPlugin.DamageSlash.Value;
+            bool fire = MegaShotPlugin.DamageFire.Value;
+            bool frost = MegaShotPlugin.DamageFrost.Value;
+            bool lightning = MegaShotPlugin.DamageLightning.Value;
+            bool poison = MegaShotPlugin.DamagePoison.Value;
+            bool spirit = MegaShotPlugin.DamageSpirit.Value;
 
             int typeCount = 0;
             if (pierce) typeCount++;
@@ -924,7 +924,7 @@ namespace MegaCrossbows
             }
 
             // Stagger / knockback
-            float staggerMult = MegaCrossbowsPlugin.Stagger.Value;
+            float staggerMult = MegaShotPlugin.Stagger.Value;
             try { hitData.m_pushForce = (weapon.m_shared?.m_attackForce ?? 0f) * staggerMult; } catch { }
             try { hitData.m_staggerMultiplier = staggerMult; } catch { }
 
@@ -942,7 +942,7 @@ namespace MegaCrossbows
                 catch { }
 
                 // Spawn HouseFire at impact point on ANY hit (if enabled)
-                if (MegaCrossbowsPlugin.HouseFireEnabled.Value)
+                if (MegaShotPlugin.HouseFireEnabled.Value)
                 {
                     try
                     {
@@ -1023,7 +1023,7 @@ namespace MegaCrossbows
             catch { }
 
             // 9. Physics - gravity and collision detection
-            if (MegaCrossbowsPlugin.NoGravity.Value)
+            if (MegaShotPlugin.NoGravity.Value)
             {
                 // Projectile component gravity (Valheim's custom gravity system)
                 try { projectile.m_gravity = 0f; } catch { }
@@ -1035,7 +1035,7 @@ namespace MegaCrossbows
                 Rigidbody rb = proj.GetComponent<Rigidbody>();
                 if (rb != null)
                 {
-                    if (MegaCrossbowsPlugin.NoGravity.Value)
+                    if (MegaShotPlugin.NoGravity.Value)
                     {
                         rb.useGravity = false;
                         rb.linearDamping = 0f;
@@ -1059,7 +1059,7 @@ namespace MegaCrossbows
                 if (cachedAnimator == null)
                     cachedAnimator = player.GetComponentInChildren<Animator>();
 
-                float fireRate = MegaCrossbowsPlugin.GetEffectiveFireRate();
+                float fireRate = MegaShotPlugin.GetEffectiveFireRate();
 
                 if (cachedAnimator != null)
                 {
@@ -1297,7 +1297,7 @@ namespace MegaCrossbows
             }
             else
             {
-                CrossbowHUD.ammoText = $"{state.magazineAmmo}/{MegaCrossbowsPlugin.MagazineCapacity.Value}{zoomStr}";
+                CrossbowHUD.ammoText = $"{state.magazineAmmo}/{MegaShotPlugin.MagazineCapacity.Value}{zoomStr}";
                 CrossbowHUD.distanceText = range > 0 ? $"{range:F0}m" : "";
             }
             CrossbowHUD.showHUD = true;
@@ -1363,7 +1363,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
                 if (hit == null) return;
 
                 // --- Player-built buildings are EXCLUDED from destroy mode ---
@@ -1407,7 +1407,7 @@ namespace MegaCrossbows
                 if (hit.m_skill != Skills.SkillType.Crossbows) return;
 
                 // --- Building damage multiplier ---
-                float buildMult = MegaCrossbowsPlugin.BuildingDamage.Value;
+                float buildMult = MegaShotPlugin.BuildingDamage.Value;
                 if (buildMult > 1f)
                 {
                     hit.m_damage.m_damage *= buildMult;
@@ -1424,7 +1424,7 @@ namespace MegaCrossbows
                 }
 
                 // --- Fire damage to buildings (Ashlands fire behavior) ---
-                float fireMult = MegaCrossbowsPlugin.BuildingFireDamage.Value;
+                float fireMult = MegaShotPlugin.BuildingFireDamage.Value;
                 if (fireMult > 0f)
                 {
                     float fireDmg = 10f * fireMult;
@@ -1438,7 +1438,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
                 if (hit == null) return;
 
                 // --- World-generated structure destroyed in ALT mode ---
@@ -1464,7 +1464,7 @@ namespace MegaCrossbows
                 if (hit.m_skill != Skills.SkillType.Crossbows) return;
                 if (isApplyingSpread) return;
 
-                float fireMult = MegaCrossbowsPlugin.BuildingFireDamage.Value;
+                float fireMult = MegaShotPlugin.BuildingFireDamage.Value;
                 if (fireMult <= 0f) return;
 
                 TryApplyAshlandsFire(__instance);
@@ -1486,7 +1486,7 @@ namespace MegaCrossbows
         {
             try
             {
-                float durationMult = MegaCrossbowsPlugin.BuildingFireDuration.Value;
+                float durationMult = MegaShotPlugin.BuildingFireDuration.Value;
 
                 // Try to find and call fire-related methods on WearNTear
                 // Ashlands uses methods like "UpdateFire", "SetFire", or fields like "m_burning"
@@ -1590,12 +1590,12 @@ namespace MegaCrossbows
             try
             {
                 if (isApplyingAOE) return;
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
                 if (hit == null) return;
                 if (hit.m_skill != Skills.SkillType.Crossbows) return;
                 if (!DestroyObjectsHelper.IsDestroyTagged(hit)) return;
 
-                float radius = MegaCrossbowsPlugin.AoeRadius.Value;
+                float radius = MegaShotPlugin.AoeRadius.Value;
                 if (radius <= 0f) return;
 
                 Vector3 impactPoint = hit.m_point;
@@ -1665,11 +1665,11 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
                 if (hit == null) return;
                 if (hit.m_skill != Skills.SkillType.Crossbows) return;
 
-                float dotMult = MegaCrossbowsPlugin.ElementalDoT.Value;
+                float dotMult = MegaShotPlugin.ElementalDoT.Value;
                 if (dotMult <= 0f) return;
 
                 // Check if there's any elemental damage on this hit
@@ -1741,7 +1741,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
                 if (__instance.m_items == null) return;
 
                 foreach (var prefab in __instance.m_items)
@@ -1985,8 +1985,8 @@ namespace MegaCrossbows
         /// </summary>
         public static bool TryApplyDestroyDamage(HitData hit)
         {
-            if (!MegaCrossbowsPlugin.ModEnabled.Value) return false;
-            if (!MegaCrossbowsPlugin.DestroyObjects.Value) return false;
+            if (!MegaShotPlugin.ModEnabled.Value) return false;
+            if (!MegaShotPlugin.DestroyObjects.Value) return false;
             if (hit == null) return false;
 
             // Detect destroy-tagged bolts by their chop/pickaxe values
@@ -2113,7 +2113,7 @@ namespace MegaCrossbows
             lastProcessedRockId = rockId;
             lastProcessedRockTime = Time.time;
 
-            float radius = MegaCrossbowsPlugin.AoeRadius.Value;
+            float radius = MegaShotPlugin.AoeRadius.Value;
             if (radius <= 0f) radius = 1f;
 
             if (impactPoint == Vector3.zero) impactPoint = hit.m_point;
@@ -2174,12 +2174,12 @@ namespace MegaCrossbows
         {
             if (isApplyingAOE) return;
             if (isDestroyingAreas) return; // don't AOE blast while fracturing sub-areas
-            if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
-            if (!MegaCrossbowsPlugin.DestroyObjects.Value) return;
+            if (!MegaShotPlugin.ModEnabled.Value) return;
+            if (!MegaShotPlugin.DestroyObjects.Value) return;
             if (hit == null) return;
             if (hit.m_damage.m_chop < 999000f && hit.m_damage.m_pickaxe < 999000f) return;
 
-            float radius = MegaCrossbowsPlugin.AoeRadius.Value;
+            float radius = MegaShotPlugin.AoeRadius.Value;
             if (radius <= 0f)
                 return;
 
@@ -2344,7 +2344,7 @@ namespace MegaCrossbows
         {
             try
             {
-                float radius = MegaCrossbowsPlugin.AoeRadius.Value;
+                float radius = MegaShotPlugin.AoeRadius.Value;
                 int pieceMask = LayerMask.GetMask("piece", "piece_nonsolid");
                 Collider[] nearby = Physics.OverlapSphere(position, radius, pieceMask);
 

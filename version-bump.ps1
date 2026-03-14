@@ -13,7 +13,7 @@ param(
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
 # Read current version from project file
-$csprojPath = "MegaCrossbows\MegaCrossbows.csproj"
+$csprojPath = "MegaShot\MegaShot.csproj"
 $csprojContent = Get-Content $csprojPath -Raw
 
 if ($csprojContent -match '<Version>(\d+)\.(\d+)\.(\d+)</Version>') {
@@ -47,7 +47,7 @@ if ($csprojContent -match '<Version>(\d+)\.(\d+)\.(\d+)</Version>') {
     Set-Content $csprojPath $csprojContent -NoNewline
     
     # Update Class1.cs
-    $class1Path = "MegaCrossbows\Class1.cs"
+    $class1Path = "MegaShot\Class1.cs"
     $class1Content = Get-Content $class1Path -Raw
     $class1Content = $class1Content -replace 'PluginVersion = "\d+\.\d+\.\d+"', "PluginVersion = `"$newVersion`""
     Set-Content $class1Path $class1Content -NoNewline

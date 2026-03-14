@@ -1,4 +1,4 @@
-# MegaCrossbows
+# MegaShot
 
 A powerful BepInEx mod for Valheim that transforms crossbows into fully-automatic weapons with advanced features.
 
@@ -16,12 +16,12 @@ A powerful BepInEx mod for Valheim that transforms crossbows into fully-automati
 
 1. Install [BepInEx](https://valheim.thunderstore.io/package/denikson/BepInExPack_Valheim/)
 2. Download the latest release
-3. Extract `MegaCrossbows.dll` to `BepInEx/plugins/`
+3. Extract `MegaShot.dll` to `BepInEx/plugins/`
 4. Launch Valheim
 
 ## Configuration
 
-Configuration file is located at `BepInEx/config/com.rikal.megacrossbows.cfg`
+Configuration file is located at `BepInEx/config/com.rikal.MegaShot.cfg`
 
 ### General Settings
 - **Enabled** (true/false): Enable or disable the mod

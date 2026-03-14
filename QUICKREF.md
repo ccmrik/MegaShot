@@ -1,4 +1,4 @@
-# MegaCrossbows - Quick Reference
+# MegaShot - Quick Reference
 
 ## Build and Deploy
 ```powershell
@@ -21,8 +21,8 @@
 
 | File | Purpose |
 |------|---------|
-| MegaCrossbows/Class1.cs | Main plugin code |
-| MegaCrossbows/CrossbowPatches.cs | Game patches |
+| MegaShot/Class1.cs | Main plugin code |
+| MegaShot/CrossbowPatches.cs | Game patches |
 | VALHEIM_API_VERIFIED.md | Verified Valheim API methods |
 
 ## Testing Checklist

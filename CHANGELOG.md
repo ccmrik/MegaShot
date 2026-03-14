@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to MegaCrossbows will be documented in this file.
+All notable changes to MegaShot will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0] - 2024-01-XX
 
 ### Added
-- Initial release of MegaCrossbows mod
+- Initial release of MegaShot mod
 - Full-automatic fire system for all crossbows
 - Magazine system with configurable capacity (default: 1000 rounds)
 - Automatic reload when magazine empties (2-second reload time)

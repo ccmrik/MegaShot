@@ -1,4 +1,4 @@
-﻿using BepInEx;
+using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
 using UnityEngine;
@@ -7,14 +7,14 @@ using System.IO;
 using System.Collections.Generic;
 using System.Reflection;
 
-namespace MegaCrossbows
+namespace MegaShot
 {
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
-    public class MegaCrossbowsPlugin : BaseUnityPlugin
+    public class MegaShotPlugin : BaseUnityPlugin
     {
-        public const string PluginGUID = "com.rikal.megacrossbows";
-        public const string PluginName = "MegaCrossbows";
-        public const string PluginVersion = "2.0.0";
+        public const string PluginGUID = "com.rikal.megashot";
+        public const string PluginName = "MegaShot";
+        public const string PluginVersion = "2.0.1";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -84,7 +84,7 @@ namespace MegaCrossbows
                 "Hold this key while firing to destroy objects (only when DestroyObjects is enabled)");
             WeaponProfile = Config.Bind("1. General", "WeaponProfile", "Custom",
                 new ConfigDescription(
-                    "Weapon profile — sets fire rate + velocity to match a real weapon.\n" +
+                    "Weapon profile � sets fire rate + velocity to match a real weapon.\n" +
                     "Custom = use FireRate + Velocity settings below.\n" +
                     "M4A1 = 12 RPS, 910 m/s | AK-47 = 10 RPS, 715 m/s\n" +
                     "MP5 = 13 RPS, 400 m/s  | P90 = 15 RPS, 715 m/s\n" +
@@ -108,9 +108,9 @@ namespace MegaCrossbows
             Velocity = Config.Bind("3. Projectile", "Velocity", 470f, "Bolt velocity % (only used when WeaponProfile = Custom)");
             NoGravity = Config.Bind("3. Projectile", "NoGravity", true, "Disable gravity for bolts (default: true for accuracy)");
             
-            // Damage — Split system: per-level total damage is split evenly across all enabled types.
+            // Damage � Split system: per-level total damage is split evenly across all enabled types.
             // e.g. Level 1 (240 total), all 8 types: 240/8 = 30 per type.
-            // DamageMultiplier scales the total: mult 2 → 2*(240/8) = 60 per type.
+            // DamageMultiplier scales the total: mult 2 ? 2*(240/8) = 60 per type.
             DamageMultiplier = Config.Bind("4. Damage", "BaseMultiplier", 1f, 
                 new ConfigDescription("Overall damage multiplier (1 = normal, 2 = double total damage, 10 = 10x)", new AcceptableValueRange<float>(0f, 10f)));
             DamagePierce = Config.Bind("4. Damage", "Pierce", true,
@@ -152,7 +152,7 @@ namespace MegaCrossbows
 
             // Diagnostic
             DiagnosticMode = Config.Bind("8. Diagnostic", "Enabled", false,
-                "Write ALT-fire hit diagnostics to Desktop\\MegaCrossbows_Diagnostic.txt (prefab names, component types, HP, tier)");
+                "Write ALT-fire hit diagnostics to Desktop\\MegaShot_Diagnostic.txt (prefab names, component types, HP, tier)");
 
             // Apply profile overrides
             ApplyProfileOverrides();
@@ -165,7 +165,7 @@ namespace MegaCrossbows
                 _harmony = new Harmony(PluginGUID);
                 _harmony.PatchAll();
 
-                // Manual patching for GetDamage (not attribute-based — safe if method doesn't exist)
+                // Manual patching for GetDamage (not attribute-based � safe if method doesn't exist)
                 try
                 {
                     var getDamageMethod = typeof(ItemDrop.ItemData).GetMethod("GetDamage",
@@ -180,7 +180,7 @@ namespace MegaCrossbows
                 }
                 catch { }
 
-                // Also patch GetDamage(int, float) overload — tooltip/UI calls this for per-level display
+                // Also patch GetDamage(int, float) overload � tooltip/UI calls this for per-level display
                 try
                 {
                     var getDamageQualityMethod = typeof(ItemDrop.ItemData).GetMethod("GetDamage",
@@ -196,7 +196,7 @@ namespace MegaCrossbows
                 }
                 catch { }
 
-                // Manual patch for UseEitr — blocks Eitr drain when holding MegaShot
+                // Manual patch for UseEitr � blocks Eitr drain when holding MegaShot
                 // (Dundr clone normally consumes Eitr; safe if UseEitr doesn't exist)
                 try
                 {

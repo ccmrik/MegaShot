@@ -1,13 +1,19 @@
+using BepInEx.Logging;
 using HarmonyLib;
 using UnityEngine;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
 
-namespace MegaCrossbows
+namespace MegaShot
 {
+    internal static class MegaShotLog
+    {
+        internal static ManualLogSource Log = BepInEx.Logging.Logger.CreateLogSource("MegaShot.Item");
+    }
+
     /// <summary>
-    /// Custom MegaShot crossbow — cloned from StaffLightning (Dundr) with 4 quality levels,
+    /// Custom MegaShot crossbow ï¿½ cloned from StaffLightning (Dundr) with 4 quality levels,
     /// per-level damage, per-level upgrade recipes with different ingredients.
     /// </summary>
     public static class MegaShotItem
@@ -84,15 +90,26 @@ namespace MegaCrossbows
 
             if (!alreadyInObjectDB)
             {
+                MegaShotLog.Log.LogInfo("MegaShot prefab not in ObjectDB yet, creating...");
                 CreatePrefab(objectDB);
-                if (megaShotPrefab == null) return;
+                if (megaShotPrefab == null)
+                {
+                    MegaShotLog.Log.LogWarning("CreatePrefab returned null â€” StaffLightning not found?");
+                    return;
+                }
 
-                // New ObjectDB instance — old recipe/stations are stale, must re-create
+                // New ObjectDB instance ï¿½ old recipe/stations are stale, must re-create
                 megaShotRecipe = null;
                 currentRecipeLevel = -1;
                 cachedWorkbench = null;
                 cachedForge = null;
                 cachedBlackForge = null;
+            }
+            else
+            {
+                MegaShotLog.Log.LogInfo("MegaShot prefab already in ObjectDB, ensuring hash registration");
+                // Always re-register in hash map â€” CopyOtherDB may reset it
+                RegisterInHashMap(objectDB);
             }
 
             // Enforce m_maxQuality = 4 on prefab and recipe item
@@ -164,7 +181,7 @@ namespace MegaCrossbows
                 // root-level with no parent ? fully active ? ZNetView.Awake works normally.
                 if (prefabContainer == null)
                 {
-                    prefabContainer = new GameObject("MegaCrossbowsPrefabs");
+                    prefabContainer = new GameObject("MegaShotPrefabs");
                     prefabContainer.SetActive(false);
                     UnityEngine.Object.DontDestroyOnLoad(prefabContainer);
                 }
@@ -207,20 +224,57 @@ namespace MegaCrossbows
 
                 // Register in ObjectDB
                 objectDB.m_items.Add(megaShotPrefab);
+                MegaShotLog.Log.LogInfo("Added MegaShot prefab to ObjectDB.m_items");
 
-                // Rebuild ObjectDB's internal hash maps (m_itemByHash + m_itemByData)
-                // so inventory loading can resolve MegaShot items from save data.
-                // UpdateRegisters() rebuilds both maps from m_items.
+                // Direct hash registration â€” belt-and-suspenders with UpdateRegisters
+                RegisterInHashMap(objectDB);
+
+                // Also rebuild via UpdateRegisters for m_itemByData etc.
                 try
                 {
                     var updateMethod = typeof(ObjectDB).GetMethod("UpdateRegisters",
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (updateMethod != null)
+                    {
                         updateMethod.Invoke(objectDB, null);
+                        MegaShotLog.Log.LogInfo("UpdateRegisters() called successfully");
+                    }
+                    else
+                    {
+                        MegaShotLog.Log.LogWarning("UpdateRegisters() method not found");
+                    }
                 }
-                catch { }
+                catch (Exception ex) { MegaShotLog.Log.LogWarning($"UpdateRegisters() failed: {ex.Message}"); }
             }
             catch { }
+        }
+
+        private static void RegisterInHashMap(ObjectDB objectDB)
+        {
+            try
+            {
+                int hash = PrefabName.GetStableHashCode();
+                var field = typeof(ObjectDB).GetField("m_itemByHash",
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (field != null)
+                {
+                    var dict = field.GetValue(objectDB) as Dictionary<int, GameObject>;
+                    if (dict != null)
+                    {
+                        dict[hash] = megaShotPrefab;
+                        MegaShotLog.Log.LogInfo($"Registered MegaShot in m_itemByHash (hash={hash})");
+                    }
+                    else
+                    {
+                        MegaShotLog.Log.LogWarning("m_itemByHash dictionary is null");
+                    }
+                }
+                else
+                {
+                    MegaShotLog.Log.LogWarning("m_itemByHash field not found");
+                }
+            }
+            catch (Exception ex) { MegaShotLog.Log.LogWarning($"RegisterInHashMap failed: {ex.Message}"); }
         }
 
         private static void TryRegisterZNetScene()
@@ -388,7 +442,7 @@ namespace MegaCrossbows
             if (megaShotRecipe == null) return;
 
             // Force recipe discovery: add to known recipes when player knows any level 1 material
-            // m_knownRecipes / m_knownMaterial may be private — access via reflection
+            // m_knownRecipes / m_knownMaterial may be private ï¿½ access via reflection
             try
             {
                 var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
@@ -486,14 +540,31 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
+                MegaShotLog.Log.LogInfo("ObjectDB.Awake Postfix â€” registering MegaShot");
                 MegaShotItem.Register(__instance);
             }
-            catch { }
+            catch (Exception ex) { MegaShotLog.Log.LogError($"ObjectDB.Awake Postfix failed: {ex}"); }
         }
     }
 
-    // Manually patched in Class1.cs (not attribute-based) — safe if GetDamage doesn't exist
+    // Re-register after CopyOtherDB (Valheim copies ObjectDB when entering a world)
+    [HarmonyPatch(typeof(ObjectDB), "CopyOtherDB")]
+    public static class PatchCopyOtherDB
+    {
+        public static void Postfix(ObjectDB __instance)
+        {
+            try
+            {
+                if (!MegaShotPlugin.ModEnabled.Value) return;
+                MegaShotLog.Log.LogInfo("ObjectDB.CopyOtherDB Postfix â€” re-registering MegaShot");
+                MegaShotItem.Register(__instance);
+            }
+            catch (Exception ex) { MegaShotLog.Log.LogError($"CopyOtherDB Postfix failed: {ex}"); }
+        }
+    }
+
+    // Manually patched in Class1.cs (not attribute-based) ï¿½ safe if GetDamage doesn't exist
     public static class PatchMegaShotDamage
     {
         // Postfix for GetDamage() (no params)
@@ -501,7 +572,7 @@ namespace MegaCrossbows
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
                 if (!MegaShotItem.IsMegaShot(__instance)) return;
                 float totalDmg = MegaShotItem.GetTotalDamage(__instance.m_quality);
                 ApplyDamageSplit(ref __result, totalDmg);
@@ -509,12 +580,12 @@ namespace MegaCrossbows
             catch { }
         }
 
-        // Postfix for GetDamage(int quality, float worldLevel) — used by tooltip/UI for per-level display
+        // Postfix for GetDamage(int quality, float worldLevel) ï¿½ used by tooltip/UI for per-level display
         public static void PostfixQuality(ItemDrop.ItemData __instance, int quality, ref HitData.DamageTypes __result)
         {
             try
             {
-                if (!MegaCrossbowsPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return;
                 if (!MegaShotItem.IsMegaShot(__instance)) return;
                 float totalDmg = MegaShotItem.GetTotalDamage(quality);
                 ApplyDamageSplit(ref __result, totalDmg);
@@ -528,14 +599,14 @@ namespace MegaCrossbows
         /// </summary>
         public static void ApplyDamageSplit(ref HitData.DamageTypes result, float totalDamage)
         {
-            bool pierce = MegaCrossbowsPlugin.DamagePierce.Value;
-            bool blunt = MegaCrossbowsPlugin.DamageBlunt.Value;
-            bool slash = MegaCrossbowsPlugin.DamageSlash.Value;
-            bool fire = MegaCrossbowsPlugin.DamageFire.Value;
-            bool frost = MegaCrossbowsPlugin.DamageFrost.Value;
-            bool lightning = MegaCrossbowsPlugin.DamageLightning.Value;
-            bool poison = MegaCrossbowsPlugin.DamagePoison.Value;
-            bool spirit = MegaCrossbowsPlugin.DamageSpirit.Value;
+            bool pierce = MegaShotPlugin.DamagePierce.Value;
+            bool blunt = MegaShotPlugin.DamageBlunt.Value;
+            bool slash = MegaShotPlugin.DamageSlash.Value;
+            bool fire = MegaShotPlugin.DamageFire.Value;
+            bool frost = MegaShotPlugin.DamageFrost.Value;
+            bool lightning = MegaShotPlugin.DamageLightning.Value;
+            bool poison = MegaShotPlugin.DamagePoison.Value;
+            bool spirit = MegaShotPlugin.DamageSpirit.Value;
 
             int typeCount = 0;
             if (pierce) typeCount++;

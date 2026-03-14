@@ -1,14 +1,14 @@
-# MegaCrossbows Build and Deploy Script
+# MegaShot Build and Deploy Script
 # This script builds the mod and copies it to the plugin folder
 
 Write-Host "==================================" -ForegroundColor Cyan
-Write-Host " MegaCrossbows Build & Deploy" -ForegroundColor Cyan
+Write-Host " MegaShot Build & Deploy" -ForegroundColor Cyan
 Write-Host "==================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Build the project
 Write-Host "Building project..." -ForegroundColor Yellow
-dotnet build MegaCrossbows\MegaCrossbows.csproj --configuration Release
+dotnet build MegaShot\MegaShot.csproj --configuration Release
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`n? Build failed! Check errors above." -ForegroundColor Red
@@ -17,9 +17,9 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "`n? Build successful!" -ForegroundColor Green
 
-$srcDll = "MegaCrossbows\bin\Release\net462\MegaCrossbows.dll"
-$pluginDir = "C:\Users\Rik\AppData\Roaming\r2modmanPlus-local\Valheim\profiles\Valheim Min Mods\BepInEx\plugins\MegaCrossbows"
-$pluginPath = Join-Path $pluginDir "MegaCrossbows.dll"
+$srcDll = "MegaShot\bin\Release\net462\MegaShot.dll"
+$pluginDir = "C:\Users\Rik\AppData\Roaming\r2modmanPlus-local\Valheim\profiles\Valheim Min Mods\BepInEx\plugins\MegaShot"
+$pluginPath = Join-Path $pluginDir "MegaShot.dll"
 
 # Ensure plugin directory exists
 if (!(Test-Path $pluginDir)) { New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null }

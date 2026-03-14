@@ -254,4 +254,4 @@ if (ammoItem != null && ammoItem.m_shared.m_attack.m_attackProjectile != null)
 
 ---
 
-This document is based on actual testing and verified working code from MegaCrossbows v2.9.1.
+This document is based on actual testing and verified working code from MegaShot v2.9.1.

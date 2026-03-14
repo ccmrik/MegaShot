@@ -47,4 +47,4 @@ BepInEx/
 
 # Game assemblies (don't commit)
 *.dll
-!MegaCrossbows.dll
+!MegaShot.dll
