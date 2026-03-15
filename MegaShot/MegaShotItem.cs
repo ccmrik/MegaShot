@@ -94,7 +94,7 @@ namespace MegaShot
                 CreatePrefab(objectDB);
                 if (megaShotPrefab == null)
                 {
-                    MegaShotLog.Log.LogWarning("CreatePrefab returned null — StaffLightning not found?");
+                    MegaShotLog.Log.LogInfo("Deferred — StaffLightning not available yet (will retry on CopyOtherDB)");
                     return;
                 }
 
