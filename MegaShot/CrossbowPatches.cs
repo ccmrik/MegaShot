@@ -929,6 +929,14 @@ namespace MegaShot
             try { hitData.m_staggerMultiplier = staggerMult; } catch { }
 
             // 6. Setup projectile (VERIFIED: 6-parameter overload, no ammo)
+            // Ensure rigidbody is non-kinematic before Setup sets velocity
+            try
+            {
+                Rigidbody rbSetup = proj.GetComponent<Rigidbody>();
+                if (rbSetup != null && rbSetup.isKinematic)
+                    rbSetup.isKinematic = false;
+            }
+            catch { }
             projectile.Setup(player, velocity, 0f, hitData, weapon, weapon);
 
             // Set tool tier AFTER Setup via reflection (Setup may overwrite from item data)
