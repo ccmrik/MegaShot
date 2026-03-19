@@ -14,7 +14,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.0.3";
+        public const string PluginVersion = "2.0.4";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -84,7 +84,7 @@ namespace MegaShot
                 "Hold this key while firing to destroy objects (only when DestroyObjects is enabled)");
             WeaponProfile = Config.Bind("1. General", "WeaponProfile", "Custom",
                 new ConfigDescription(
-                    "Weapon profile � sets fire rate + velocity to match a real weapon.\n" +
+                    "Weapon profile - sets fire rate + velocity to match a real weapon.\n" +
                     "Custom = use FireRate + Velocity settings below.\n" +
                     "M4A1 = 12 RPS, 910 m/s | AK-47 = 10 RPS, 715 m/s\n" +
                     "MP5 = 13 RPS, 400 m/s  | P90 = 15 RPS, 715 m/s\n" +
