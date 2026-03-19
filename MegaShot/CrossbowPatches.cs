@@ -486,7 +486,7 @@ namespace MegaShot
             if (!states.ContainsKey(id))
             {
                 var s = new CrossbowState();
-                s.magazineAmmo = MegaShotPlugin.MagazineCapacity.Value;
+                s.magazineAmmo = MegaShotPlugin.GetEffectiveMagazineCapacity();
                 states[id] = s;
             }
             return states[id];
@@ -608,7 +608,7 @@ namespace MegaShot
                 if (Time.time - state.reloadStartTime >= 2f)
                 {
                     state.isReloading = false;
-                    state.magazineAmmo = MegaShotPlugin.MagazineCapacity.Value;
+                    state.magazineAmmo = MegaShotPlugin.GetEffectiveMagazineCapacity();
                     __instance.Message(MessageHud.MessageType.Center, "<color=green>RELOADED</color>");
                 }
                 try { UpdateHUD(__instance, state); } catch { }
@@ -1305,7 +1305,7 @@ namespace MegaShot
             }
             else
             {
-                CrossbowHUD.ammoText = $"{state.magazineAmmo}/{MegaShotPlugin.MagazineCapacity.Value}{zoomStr}";
+                CrossbowHUD.ammoText = $"{state.magazineAmmo}/{MegaShotPlugin.GetEffectiveMagazineCapacity()}{zoomStr}";
                 CrossbowHUD.distanceText = range > 0 ? $"{range:F0}m" : "";
             }
             CrossbowHUD.showHUD = true;

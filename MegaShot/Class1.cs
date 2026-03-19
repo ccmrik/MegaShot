@@ -14,7 +14,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.0.4";
+        public const string PluginVersion = "2.0.5";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -22,7 +22,7 @@ namespace MegaShot
         public static ConfigEntry<bool> DestroyObjects;
         public static ConfigEntry<KeyCode> DestroyObjectsKey;
         public static ConfigEntry<string> WeaponProfile;
-        public static ConfigEntry<float> FireRate;
+        public static ConfigEntry<int> FireRate;
         public static ConfigEntry<int> MagazineCapacity;
         
         // Zoom
@@ -84,21 +84,21 @@ namespace MegaShot
                 "Hold this key while firing to destroy objects (only when DestroyObjects is enabled)");
             WeaponProfile = Config.Bind("1. General", "WeaponProfile", "Custom",
                 new ConfigDescription(
-                    "Weapon profile - sets fire rate + velocity to match a real weapon.\n" +
-                    "Custom = use FireRate + Velocity settings below.\n" +
-                    "M4A1 = 12 RPS, 910 m/s | AK-47 = 10 RPS, 715 m/s\n" +
-                    "MP5 = 13 RPS, 400 m/s  | P90 = 15 RPS, 715 m/s\n" +
-                    "M249 SAW = 15 RPS, 915 m/s | MG42 = 20 RPS, 740 m/s\n" +
-                    "Minigun = 50 RPS, 869 m/s | Barrett = 2 RPS, 890 m/s",
+                    "Weapon profile - sets fire rate, velocity + magazine capacity.\n" +
+                    "Custom = use FireRate, Velocity + MagazineCapacity settings below.\n" +
+                    "M4A1 = 12 RPS, 910 m/s, 30 mag | AK-47 = 10 RPS, 715 m/s, 30 mag\n" +
+                    "MP5 = 13 RPS, 400 m/s, 30 mag  | P90 = 15 RPS, 715 m/s, 50 mag\n" +
+                    "M249 SAW = 15 RPS, 915 m/s, 200 mag | MG42 = 20 RPS, 740 m/s, 250 mag\n" +
+                    "Minigun = 50 RPS, 869 m/s, 4000 mag | Barrett = 2 RPS, 890 m/s, 10 mag",
                     new AcceptableValueList<string>(
                         "Custom", "M4A1", "M16", "AK-47", "AK-74", "SCAR-H", "G3", "FAL",
                         "MP5", "UZI", "P90", "MP7", "Thompson", "Sten", "PPSh-41", "KRISS Vector",
                         "M249 SAW", "M60", "PKM", "MG42", "MG3",
                         "Minigun", "GAU-8 Avenger",
                         "M2 Browning", "Barrett", "StG 44")));
-            FireRate = Config.Bind("1. General", "FireRate", 10f,
-                new ConfigDescription("Fire rate per second (only used when WeaponProfile = Custom)", new AcceptableValueRange<float>(1f, 100f)));
-            MagazineCapacity = Config.Bind("1. General", "MagazineCapacity", 1000, "Magazine capacity before reload");
+            FireRate = Config.Bind("1. General", "FireRate", 10,
+                new ConfigDescription("Fire rate per second (only used when WeaponProfile = Custom)", new AcceptableValueRange<int>(1, 100)));
+            MagazineCapacity = Config.Bind("1. General", "MagazineCapacity", 1000, "Magazine capacity before reload (only used when WeaponProfile = Custom)");
             
             // Zoom
             ZoomMin = Config.Bind("2. Zoom", "ZoomMin", 2f, "Minimum zoom level");
@@ -256,41 +256,41 @@ namespace MegaShot
             }
         }
 
-        // Weapon profile lookup: (RPS, muzzle velocity m/s)
+        // Weapon profile lookup: (RPS, muzzle velocity m/s, magazine capacity)
         // Valheim base crossbow ~200 m/s, so velocity% = realVelocity / 2
-        private static readonly Dictionary<string, System.Tuple<float, float>> WeaponProfiles =
-            new Dictionary<string, System.Tuple<float, float>>
+        private static readonly Dictionary<string, System.Tuple<float, float, int>> WeaponProfiles =
+            new Dictionary<string, System.Tuple<float, float, int>>
         {
             // Assault Rifles
-            { "M4A1",          System.Tuple.Create(12f, 455f) },
-            { "M16",           System.Tuple.Create(13f, 480f) },
-            { "AK-47",         System.Tuple.Create(10f, 358f) },
-            { "AK-74",         System.Tuple.Create(11f, 450f) },
-            { "SCAR-H",        System.Tuple.Create(10f, 405f) },
-            { "G3",            System.Tuple.Create(9f,  400f) },
-            { "FAL",           System.Tuple.Create(11f, 420f) },
-            { "StG 44",        System.Tuple.Create(9f,  343f) },
+            { "M4A1",          System.Tuple.Create(12f, 455f, 30) },
+            { "M16",           System.Tuple.Create(13f, 480f, 30) },
+            { "AK-47",         System.Tuple.Create(10f, 358f, 30) },
+            { "AK-74",         System.Tuple.Create(11f, 450f, 30) },
+            { "SCAR-H",        System.Tuple.Create(10f, 405f, 20) },
+            { "G3",            System.Tuple.Create(9f,  400f, 20) },
+            { "FAL",           System.Tuple.Create(11f, 420f, 20) },
+            { "StG 44",        System.Tuple.Create(9f,  343f, 30) },
             // SMGs / PDWs
-            { "MP5",           System.Tuple.Create(13f, 200f) },
-            { "UZI",           System.Tuple.Create(10f, 200f) },
-            { "P90",           System.Tuple.Create(15f, 358f) },
-            { "MP7",           System.Tuple.Create(16f, 368f) },
-            { "Thompson",      System.Tuple.Create(11f, 143f) },
-            { "Sten",          System.Tuple.Create(9f,  183f) },
-            { "PPSh-41",       System.Tuple.Create(16f, 245f) },
-            { "KRISS Vector",  System.Tuple.Create(20f, 183f) },
+            { "MP5",           System.Tuple.Create(13f, 200f, 30) },
+            { "UZI",           System.Tuple.Create(10f, 200f, 32) },
+            { "P90",           System.Tuple.Create(15f, 358f, 50) },
+            { "MP7",           System.Tuple.Create(16f, 368f, 40) },
+            { "Thompson",      System.Tuple.Create(11f, 143f, 30) },
+            { "Sten",          System.Tuple.Create(9f,  183f, 32) },
+            { "PPSh-41",       System.Tuple.Create(16f, 245f, 71) },
+            { "KRISS Vector",  System.Tuple.Create(20f, 183f, 33) },
             // Machine Guns
-            { "M249 SAW",      System.Tuple.Create(15f, 458f) },
-            { "M60",           System.Tuple.Create(9f,  427f) },
-            { "PKM",           System.Tuple.Create(11f, 413f) },
-            { "MG42",          System.Tuple.Create(20f, 370f) },
-            { "MG3",           System.Tuple.Create(18f, 410f) },
+            { "M249 SAW",      System.Tuple.Create(15f, 458f, 200) },
+            { "M60",           System.Tuple.Create(9f,  427f, 100) },
+            { "PKM",           System.Tuple.Create(11f, 413f, 100) },
+            { "MG42",          System.Tuple.Create(20f, 370f, 250) },
+            { "MG3",           System.Tuple.Create(18f, 410f, 120) },
             // Heavy
-            { "Minigun",       System.Tuple.Create(50f, 435f) },
-            { "GAU-8 Avenger", System.Tuple.Create(65f, 535f) },
-            { "M2 Browning",   System.Tuple.Create(8f,  445f) },
+            { "Minigun",       System.Tuple.Create(50f, 435f, 4000) },
+            { "GAU-8 Avenger", System.Tuple.Create(65f, 535f, 1174) },
+            { "M2 Browning",   System.Tuple.Create(8f,  445f, 100) },
             // Sniper
-            { "Barrett",       System.Tuple.Create(2f,  445f) },
+            { "Barrett",       System.Tuple.Create(2f,  445f, 10) },
         };
 
         /// <summary>
@@ -301,7 +301,7 @@ namespace MegaShot
             string profile = WeaponProfile.Value;
             if (profile != "Custom" && WeaponProfiles.ContainsKey(profile))
                 return WeaponProfiles[profile].Item1;
-            return FireRate.Value;
+            return (float)FireRate.Value;
         }
 
         /// <summary>
@@ -313,6 +313,17 @@ namespace MegaShot
             if (profile != "Custom" && WeaponProfiles.ContainsKey(profile))
                 return WeaponProfiles[profile].Item2;
             return Velocity.Value;
+        }
+
+        /// <summary>
+        /// Returns effective magazine capacity: from weapon profile or custom config.
+        /// </summary>
+        public static int GetEffectiveMagazineCapacity()
+        {
+            string profile = WeaponProfile.Value;
+            if (profile != "Custom" && WeaponProfiles.ContainsKey(profile))
+                return WeaponProfiles[profile].Item3;
+            return MagazineCapacity.Value;
         }
     }
 }
