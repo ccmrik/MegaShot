@@ -14,7 +14,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.0.5";
+        public const string PluginVersion = "2.0.6";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -64,6 +64,7 @@ namespace MegaShot
 
         private Harmony _harmony;
         private FileSystemWatcher _configWatcher;
+        private static bool _suppressWatcher;
 
 
         private void Awake()
@@ -97,7 +98,7 @@ namespace MegaShot
                         "Minigun", "GAU-8 Avenger",
                         "M2 Browning", "Barrett", "StG 44")));
             FireRate = Config.Bind("1. General", "FireRate", 10,
-                new ConfigDescription("Fire rate per second (only used when WeaponProfile = Custom)", new AcceptableValueRange<int>(1, 100)));
+                "Fire rate per second (only used when WeaponProfile = Custom)");
             MagazineCapacity = Config.Bind("1. General", "MagazineCapacity", 1000, "Magazine capacity before reload (only used when WeaponProfile = Custom)");
             
             // Zoom
@@ -241,18 +242,35 @@ namespace MegaShot
         {
             try
             {
+                if (_suppressWatcher) return;
                 Config.Reload();
                 ApplyProfileOverrides();
             }
             catch { }
         }
 
-        private static void ApplyProfileOverrides()
+        private void ApplyProfileOverrides()
         {
             if (ConfigProfile.Value == "Development")
             {
                 DestroyObjects.Value = true;
                 AoeRadius.Value = 10f;
+            }
+
+            string profile = WeaponProfile.Value;
+            if (profile != "Custom" && WeaponProfiles.ContainsKey(profile))
+            {
+                var p = WeaponProfiles[profile];
+                bool changed = false;
+                if (FireRate.Value != (int)p.Item1) { FireRate.Value = (int)p.Item1; changed = true; }
+                if (Velocity.Value != p.Item2) { Velocity.Value = p.Item2; changed = true; }
+                if (MagazineCapacity.Value != p.Item3) { MagazineCapacity.Value = p.Item3; changed = true; }
+                if (changed)
+                {
+                    _suppressWatcher = true;
+                    try { Config.Save(); }
+                    finally { _suppressWatcher = false; }
+                }
             }
         }
 
