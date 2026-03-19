@@ -474,11 +474,8 @@ namespace MegaShot
         private static bool fireClipSearched = false;
 
         // Adaptive sound system for high fire rates
-        private static AudioSource loopAudioSource;
         private static float lastSoundTime = 0f;
-        private static bool loopingSoundActive = false;
-        private const float DISCRETE_SOUND_MAX_RATE = 15f;  // Max PlayOneShot events/sec
-        private const float LOOP_THRESHOLD_RATE = 30f;       // Above this, use looping audio
+        private const float SOUND_THROTTLE_RATE = 12f;  // Max PlayOneShot events/sec for high fire rates
 
         // HUD throttle
         private static float lastHudUpdate = 0f;
@@ -578,7 +575,6 @@ namespace MegaShot
                 // Reset audio cache when leaving crossbow
                 fireClipSearched = false;
                 cachedFireClip = null;
-                StopLoopingFireSound();
                 return;
             }
 
@@ -667,9 +663,6 @@ namespace MegaShot
                         cachedAnimator.speed = 1f;
                 }
                 catch { }
-
-                // Stop looping fire sound when not firing
-                StopLoopingFireSound();
             }
 
             try { UpdateHUD(__instance, state); } catch { }
@@ -1103,43 +1096,28 @@ namespace MegaShot
             }
             catch { }
 
-            // 11. Adaptive sound system - scales from discrete shots to looping audio
-            //     ≤15 rps: per-shot effects (all 3 attempts, like vanilla)
-            //     16-30 rps: throttled PlayOneShot only (max 15/sec, skips EffectList.Create)
-            //     >30 rps: single looping AudioSource (1 audio channel, pitch scales with rate)
+            // 11. Adaptive sound system — two tiers based on fire rate:
+            //     ≤15 rps: per-shot effects (all 3 Valheim fallback attempts, like vanilla)
+            //     >15 rps: throttled overlapping PlayOneShot (~12/sec on one AudioSource)
+            //     Overlapping one-shots naturally blend into continuous "brrrrt" fire sound.
+            //     12 PlayOneShot/sec with a ~0.3-0.5s clip = ~4-6 overlapping voices = smooth.
             try
             {
                 float fireRate = MegaShotPlugin.GetEffectiveFireRate();
 
-                // Ensure fire clip is always cached for throttled/looping modes
+                // Ensure fire clip is always cached
                 if (!fireClipSearched)
                 {
                     fireClipSearched = true;
                     cachedFireClip = FindFireClip(attack, weapon);
                 }
 
-                if (fireRate > LOOP_THRESHOLD_RATE)
+                if (fireRate > SOUND_THROTTLE_RATE)
                 {
-                    // --- LOOPING MODE: extreme fire rates (>30 rps) ---
-                    // Single looping AudioSource — uses exactly 1 audio channel
-                    // regardless of fire rate (100, 1000, 10000 all the same)
-                    if (!loopingSoundActive && cachedFireClip != null)
-                    {
-                        StartLoopingFireSound(player, fireRate);
-                    }
-                    else if (loopingSoundActive && loopAudioSource != null)
-                    {
-                        // Update pitch if fire rate changed mid-burst
-                        loopAudioSource.pitch = GetLoopPitch(fireRate);
-                    }
-                }
-                else if (fireRate > DISCRETE_SOUND_MAX_RATE)
-                {
-                    // --- THROTTLED MODE: moderate fire rates (16-30 rps) ---
-                    // PlayOneShot capped at DISCRETE_SOUND_MAX_RATE per second
-                    // Skips EffectList.Create to avoid spawning GameObjects every shot
-                    StopLoopingFireSound();
-                    float soundInterval = 1f / DISCRETE_SOUND_MAX_RATE;
+                    // --- THROTTLED MODE: high fire rates (>12 rps) ---
+                    // PlayOneShot capped at ~12/sec. Overlapping tails create
+                    // a continuous sound naturally — no looping needed.
+                    float soundInterval = 1f / SOUND_THROTTLE_RATE;
                     if (Time.time - lastSoundTime >= soundInterval)
                     {
                         lastSoundTime = Time.time;
@@ -1153,9 +1131,8 @@ namespace MegaShot
                 }
                 else
                 {
-                    // --- DISCRETE MODE: low fire rates (≤15 rps) ---
+                    // --- DISCRETE MODE: low fire rates (≤12 rps) ---
                     // Full per-shot sound with all fallback attempts (current behaviour)
-                    StopLoopingFireSound();
                     bool soundPlayed = false;
 
                     // Attempt 1: EffectList.Create (Valheim's native effect system)
@@ -1199,47 +1176,6 @@ namespace MegaShot
                 cachedAudioSource.spatialBlend = 1f;
                 cachedAudioSource.maxDistance = 50f;
                 cachedAudioSource.rolloffMode = AudioRolloffMode.Linear;
-            }
-        }
-
-        private static float GetLoopPitch(float fireRate)
-        {
-            // Scale pitch from 1.0 at 30 rps up to ~1.5 at 1000+ rps
-            // log10(30)≈1.48, log10(1000)=3, so range maps ~1.0 to ~1.5
-            float t = Mathf.InverseLerp(Mathf.Log10(LOOP_THRESHOLD_RATE), Mathf.Log10(1000f), Mathf.Log10(fireRate));
-            return Mathf.Lerp(1.0f, 1.5f, t);
-        }
-
-        private static void StartLoopingFireSound(Player player, float fireRate)
-        {
-            if (cachedFireClip == null) return;
-
-            if (loopAudioSource == null)
-            {
-                // Create a dedicated AudioSource for looping (separate from cachedAudioSource)
-                loopAudioSource = player.gameObject.AddComponent<AudioSource>();
-                loopAudioSource.spatialBlend = 1f;
-                loopAudioSource.maxDistance = 50f;
-                loopAudioSource.rolloffMode = AudioRolloffMode.Linear;
-            }
-
-            loopAudioSource.clip = cachedFireClip;
-            loopAudioSource.loop = true;
-            loopAudioSource.pitch = GetLoopPitch(fireRate);
-            loopAudioSource.volume = 1f;
-            loopAudioSource.Play();
-            loopingSoundActive = true;
-        }
-
-        private static void StopLoopingFireSound()
-        {
-            if (!loopingSoundActive) return;
-            loopingSoundActive = false;
-            if (loopAudioSource != null && loopAudioSource.isPlaying)
-            {
-                loopAudioSource.Stop();
-                loopAudioSource.loop = false;
-                loopAudioSource.clip = null;
             }
         }
 
