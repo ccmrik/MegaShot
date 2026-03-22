@@ -208,10 +208,16 @@ namespace MegaShot
                 // Force crossbow skill type so all Harmony patches (AOE, DoT, etc.) trigger correctly
                 shared.m_skillType = Skills.SkillType.Crossbows;
 
-                // Remove Eitr cost from attacks
+                // Remove ALL Eitr costs (Dundr has attack, reload, and draw Eitr drains)
                 try { shared.m_attack.m_attackEitr = 0f; } catch { }
                 try { shared.m_secondaryAttack.m_attackEitr = 0f; } catch { }
                 try { shared.m_attack.m_attackStamina = 0f; } catch { }
+                try { shared.m_attack.m_reloadEitrDrain = 0f; } catch { }
+                try { shared.m_attack.m_drawEitrDrain = 0f; } catch { }
+                try { shared.m_attack.m_requiresReload = false; } catch { }
+                try { shared.m_secondaryAttack.m_reloadEitrDrain = 0f; } catch { }
+                try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch { }
+                try { shared.m_secondaryAttack.m_requiresReload = false; } catch { }
 
                 // Base damage (level 1) + linear per-level increment for native tooltip support
                 // Dundr native type is lightning; our postfix overrides with split values

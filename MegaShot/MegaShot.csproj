@@ -6,7 +6,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>disable</Nullable>
     <AssemblyName>MegaShot</AssemblyName>
-    <Version>2.2.2</Version>
+    <Version>2.2.3</Version>
   </PropertyGroup>
 
   <ItemGroup>
@@ -67,9 +67,5 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="xcopy &quot;$(TargetPath)&quot; &quot;C:\Users\Rik\AppData\Roaming\r2modmanPlus-local\Valheim\profiles\Valheim Min Mods\BepInEx\plugins\$(ProjectName)\&quot; /Y /I" IgnoreExitCode="true" />
-  </Target>
 
 </Project>
