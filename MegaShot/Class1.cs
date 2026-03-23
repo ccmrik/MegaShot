@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.3.1";
+        public const string PluginVersion = "2.3.2";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -66,6 +66,7 @@ namespace MegaShot
         private void Awake()
         {
             MigrateConfig(Config.ConfigFilePath);
+            Config.Reload();
 
             // General
             ModEnabled = Config.Bind("1. General", "Enabled", true, "Enable or disable the mod");
