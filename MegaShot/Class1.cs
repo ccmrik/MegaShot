@@ -13,11 +13,10 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.2.4";
+        public const string PluginVersion = "2.3.0";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
-        public static ConfigEntry<string> ConfigProfile;
         public static ConfigEntry<bool> DestroyObjects;
         public static ConfigEntry<KeyCode> DestroyObjectsKey;
         public static ConfigEntry<int> FireRate;
@@ -57,8 +56,8 @@ namespace MegaShot
         // HouseFire
         public static ConfigEntry<bool> HouseFireEnabled;
 
-        // Diagnostic
-        public static ConfigEntry<bool> DiagnosticMode;
+        // Debug
+        public static ConfigEntry<bool> DebugMode;
 
         private Harmony _harmony;
         private FileSystemWatcher _configWatcher;
@@ -66,14 +65,6 @@ namespace MegaShot
 
         private void Awake()
         {
-            // Profile (top of config file)
-            ConfigProfile = Config.Bind("0. Profile", "ConfigProfile", "Default",
-                new ConfigDescription(
-                    "Quick config preset.\n" +
-                    "Default = normal play settings.\n" +
-                    "Development = enables DestroyObjects + AOE radius 10m for testing.",
-                    new AcceptableValueList<string>("Default", "Development")));
-
             // General
             ModEnabled = Config.Bind("1. General", "Enabled", true, "Enable or disable the mod");
             DestroyObjects = Config.Bind("1. General", "DestroyObjects", true,
@@ -114,7 +105,7 @@ namespace MegaShot
                 "Enable spirit damage (splits total damage across enabled types)");
             Stagger = Config.Bind("4. Damage", "Stagger", 0f, 
                 new ConfigDescription("Stagger/knockback multiplier (0 = none, 1 = normal, 10 = 10x)", new AcceptableValueRange<float>(0f, 10f)));
-            ElementalDoT = Config.Bind("4. Damage", "ElementalDoT", 0f, 
+            ElementalDoT = Config.Bind("4. Damage", "ElementalDoT", 1f, 
                 new ConfigDescription("Elemental damage over time multiplier (0 = none, 1 = normal, 10 = 10x stronger DoT)", new AcceptableValueRange<float>(0f, 10f)));
             
             // AOE
@@ -130,15 +121,12 @@ namespace MegaShot
                 new ConfigDescription("How long buildings burn (1 = normal Ashlands duration, 10 = 10x duration)", new AcceptableValueRange<float>(1f, 10f)));
 
             // HouseFire (ALT-mode fire spawned on impact)
-            HouseFireEnabled = Config.Bind("7. HouseFire", "Enabled", true,
+            HouseFireEnabled = Config.Bind("7. HouseFire", "Enabled", false,
                 "Enable HouseFire spawning in ALT mode (set to false to disable fire on impact)");
 
-            // Diagnostic
-            DiagnosticMode = Config.Bind("8. Diagnostic", "Enabled", false,
+            // Debug
+            DebugMode = Config.Bind("8. Debug", "Enabled", false,
                 "Write ALT-fire hit diagnostics to Desktop\\MegaShot_Diagnostic.txt (prefab names, component types, HP, tier)");
-
-            // Apply profile overrides
-            ApplyProfileOverrides();
 
             // Watch config file for live reload on save
             SetupConfigWatcher();
@@ -225,18 +213,8 @@ namespace MegaShot
             try
             {
                 Config.Reload();
-                ApplyProfileOverrides();
             }
             catch { }
-        }
-
-        private static void ApplyProfileOverrides()
-        {
-            if (ConfigProfile.Value == "Development")
-            {
-                DestroyObjects.Value = true;
-                AoeRadius.Value = 10f;
-            }
         }
 
         public static float GetEffectiveFireRate() => (float)FireRate.Value;

@@ -22,7 +22,7 @@ namespace MegaShot
         {
             try
             {
-                if (!MegaShotPlugin.DiagnosticMode.Value) return;
+                if (!MegaShotPlugin.DebugMode.Value) return;
                 File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " " + message + "\n");
             }
             catch { }
