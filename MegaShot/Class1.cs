@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.3.2";
+        public const string PluginVersion = "2.3.3";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -233,7 +233,19 @@ namespace MegaShot
                 bool changed = false;
 
                 changed |= MigrateCfgSection(ref text, "0. Profile", null);
+                changed |= MigrateCfgSection(ref text, "Profile", null);
                 changed |= MigrateCfgSection(ref text, "8. Diagnostic", "8. Debug");
+                changed |= MigrateCfgSection(ref text, "Diagnostic", "8. Debug");
+
+                // Unnumbered → numbered
+                changed |= MigrateCfgSection(ref text, "General", "1. General");
+                changed |= MigrateCfgSection(ref text, "Zoom", "2. Zoom");
+                changed |= MigrateCfgSection(ref text, "Projectile", "3. Projectile");
+                changed |= MigrateCfgSection(ref text, "Damage", "4. Damage");
+                changed |= MigrateCfgSection(ref text, "AOE", "5. AOE");
+                changed |= MigrateCfgSection(ref text, "Building Damage", "6. Building Damage");
+                changed |= MigrateCfgSection(ref text, "HouseFire", "7. HouseFire");
+                changed |= MigrateCfgSection(ref text, "Debug", "8. Debug");
 
                 if (changed)
                     File.WriteAllText(configPath, text.TrimEnd() + "\n");
