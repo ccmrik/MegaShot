@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.3.0";
+        public const string PluginVersion = "2.3.1";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -65,6 +65,8 @@ namespace MegaShot
 
         private void Awake()
         {
+            MigrateConfig(Config.ConfigFilePath);
+
             // General
             ModEnabled = Config.Bind("1. General", "Enabled", true, "Enable or disable the mod");
             DestroyObjects = Config.Bind("1. General", "DestroyObjects", true,
@@ -220,6 +222,45 @@ namespace MegaShot
         public static float GetEffectiveFireRate() => (float)FireRate.Value;
         public static float GetEffectiveVelocity() => Velocity.Value;
         public static int GetEffectiveMagazineCapacity() => MagazineCapacity.Value;
+
+        private static void MigrateConfig(string configPath)
+        {
+            try
+            {
+                if (!File.Exists(configPath)) return;
+                string text = File.ReadAllText(configPath);
+                bool changed = false;
+
+                changed |= MigrateCfgSection(ref text, "0. Profile", null);
+                changed |= MigrateCfgSection(ref text, "8. Diagnostic", "8. Debug");
+
+                if (changed)
+                    File.WriteAllText(configPath, text.TrimEnd() + "\n");
+            }
+            catch { }
+        }
+
+        private static bool MigrateCfgSection(ref string text, string oldName, string newName)
+        {
+            string oldHeader = "[" + oldName + "]";
+            int idx = text.IndexOf(oldHeader, StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) return false;
+
+            int sectionEnd = text.IndexOf("\n[", idx + oldHeader.Length, StringComparison.Ordinal);
+
+            if (newName == null || text.IndexOf("[" + newName + "]", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                if (sectionEnd < 0)
+                    text = text.Substring(0, idx).TrimEnd('\r', '\n');
+                else
+                    text = text.Substring(0, idx) + text.Substring(sectionEnd + 1);
+            }
+            else
+            {
+                text = text.Remove(idx, oldHeader.Length).Insert(idx, "[" + newName + "]");
+            }
+            return true;
+        }
     }
 }
 
