@@ -48,3 +48,6 @@ BepInEx/
 # Game assemblies (don't commit)
 *.dll
 !MegaShot.dll
+
+# Maintenance reports
+maintenance-report.json

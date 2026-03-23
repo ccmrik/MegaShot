@@ -6,16 +6,16 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>disable</Nullable>
     <AssemblyName>MegaShot</AssemblyName>
-    <Version>2.2.3</Version>
+    <Version>2.2.4</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <Reference Include="BepInEx">
-      <HintPath>C:\Users\Rik\AppData\Roaming\r2modmanPlus-local\Valheim\cache\denikson-BepInExPack_Valheim\5.4.2333\BepInExPack_Valheim\BepInEx\core\BepInEx.dll</HintPath>
+      <HintPath>$(APPDATA)\MegaLoad\profiles\a01aed19fecf3a0d\BepInEx\core\BepInEx.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <HintPath>C:\Users\Rik\AppData\Roaming\r2modmanPlus-local\Valheim\cache\denikson-BepInExPack_Valheim\5.4.2333\BepInExPack_Valheim\BepInEx\core\0Harmony.dll</HintPath>
+      <HintPath>$(APPDATA)\MegaLoad\profiles\a01aed19fecf3a0d\BepInEx\core\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="assembly_guiutils">
