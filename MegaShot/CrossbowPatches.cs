@@ -1730,7 +1730,6 @@ namespace MegaShot
                     if (!IsElementalEffect(se)) continue;
 
                     // Scale TTL (duration)
-                    float originalTTL = se.m_ttl;
                     se.m_ttl *= dotMult;
 
                     // Scale damage pool (SE_Burning.m_damage is HitData.DamageTypes, not float)
