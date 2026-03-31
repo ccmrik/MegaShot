@@ -49,5 +49,11 @@ BepInEx/
 *.dll
 !MegaShot.dll
 
+# Executables
+*.exe
+
+# VS Code
+*.code-workspace
+
 # Maintenance reports
 maintenance-report.json
