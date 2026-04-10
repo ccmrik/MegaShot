@@ -31,7 +31,7 @@ namespace MegaShot
         // Split evenly across all enabled damage types, scaled by DamageMultiplier at fire time
         public static readonly float[] TotalDamagePerLevel = { 25f, 50f, 75f, 100f };
 
-        // Per-level recipe ingredient prefab names (all 5 each)
+        // Per-level recipe ingredient prefab names (3 ingredients per level, 5 of each)
         private static readonly string[][] IngredientNames = new string[][]
         {
             new[] { "Wood", "LeatherScraps", "Resin" },        // Level 1
@@ -121,7 +121,7 @@ namespace MegaShot
                 if (megaShotRecipe != null && megaShotRecipe.m_item != null)
                     megaShotRecipe.m_item.m_itemData.m_shared.m_maxQuality = 4;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
             // Always attempt ZNetScene registration (may only succeed on later calls
             // when ZNetScene.instance is available)
@@ -200,7 +200,7 @@ namespace MegaShot
                 shared.m_backstabBonus = 3f;
 
                 // Clear DLC flag if any
-                try { shared.m_dlc = ""; } catch { }
+                try { shared.m_dlc = ""; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
                 // Remove ammo requirement (Dundr uses Eitr, MegaShot uses neither)
                 shared.m_ammoType = "";
@@ -209,15 +209,15 @@ namespace MegaShot
                 shared.m_skillType = Skills.SkillType.Crossbows;
 
                 // Remove ALL Eitr costs (Dundr has attack, reload, and draw Eitr drains)
-                try { shared.m_attack.m_attackEitr = 0f; } catch { }
-                try { shared.m_secondaryAttack.m_attackEitr = 0f; } catch { }
-                try { shared.m_attack.m_attackStamina = 0f; } catch { }
-                try { shared.m_attack.m_reloadEitrDrain = 0f; } catch { }
-                try { shared.m_attack.m_drawEitrDrain = 0f; } catch { }
-                try { shared.m_attack.m_requiresReload = false; } catch { }
-                try { shared.m_secondaryAttack.m_reloadEitrDrain = 0f; } catch { }
-                try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch { }
-                try { shared.m_secondaryAttack.m_requiresReload = false; } catch { }
+                try { shared.m_attack.m_attackEitr = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_secondaryAttack.m_attackEitr = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_attack.m_attackStamina = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_attack.m_reloadEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_attack.m_drawEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_attack.m_requiresReload = false; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_secondaryAttack.m_reloadEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                try { shared.m_secondaryAttack.m_requiresReload = false; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
                 // Base damage (level 1) + linear per-level increment for native tooltip support
                 // Dundr native type is lightning; our postfix overrides with split values
@@ -252,7 +252,7 @@ namespace MegaShot
                 }
                 catch (Exception ex) { MegaShotLog.Log.LogWarning($"UpdateRegisters() failed: {ex.Message}"); }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
 
         private static void RegisterInHashMap(ObjectDB objectDB)
@@ -302,7 +302,7 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
 
         /// <summary>
@@ -335,7 +335,7 @@ namespace MegaShot
                         break;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
 
         private static CraftingStation GetStationForLevel(int level)
@@ -365,7 +365,7 @@ namespace MegaShot
 
                 objectDB.m_recipes.Add(megaShotRecipe);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
 
         private static void SetRecipeResources(ObjectDB objectDB, int level)
@@ -406,7 +406,7 @@ namespace MegaShot
                 if (reqs.Count == names.Length)
                     currentRecipeLevel = level;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
 
         private static GameObject FindItemPrefab(ObjectDB objectDB, string name)
@@ -422,7 +422,7 @@ namespace MegaShot
                     if (result != null) return result;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
             // Fallback: search m_items by name
             try
@@ -433,7 +433,7 @@ namespace MegaShot
                         return item;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
             return null;
         }
@@ -478,7 +478,7 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
             // Enforce m_maxQuality = 4 on player's MegaShot items (in case shared data was reset)
             try
@@ -493,12 +493,12 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
             try
             {
                 bool craftingOpen = false;
-                try { craftingOpen = InventoryGui.IsVisible(); } catch { }
+                try { craftingOpen = InventoryGui.IsVisible(); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
                 if (!craftingOpen)
                 {
                     // Reset to level 1 when GUI is closed (also retry if resources are incomplete)
@@ -533,7 +533,7 @@ namespace MegaShot
                 if (ObjectDB.instance != null)
                     SetRecipeResources(ObjectDB.instance, targetLevel);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
     }
 
@@ -583,7 +583,7 @@ namespace MegaShot
                 float totalDmg = MegaShotItem.GetTotalDamage(__instance.m_quality);
                 ApplyDamageSplit(ref __result, totalDmg);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
 
         // Postfix for GetDamage(int quality, float worldLevel) � used by tooltip/UI for per-level display
@@ -596,7 +596,7 @@ namespace MegaShot
                 float totalDmg = MegaShotItem.GetTotalDamage(quality);
                 ApplyDamageSplit(ref __result, totalDmg);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
         }
 
         /// <summary>

@@ -152,7 +152,7 @@ namespace MegaShot
                             _harmony.Patch(getDamageMethod, postfix: new HarmonyMethod(postfix));
                     }
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
 
                 // Also patch GetDamage(int, float) overload � tooltip/UI calls this for per-level display
                 try
@@ -168,7 +168,7 @@ namespace MegaShot
                             _harmony.Patch(getDamageQualityMethod, postfix: new HarmonyMethod(postfixQuality));
                     }
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
 
                 // Manual patch for UseEitr � blocks Eitr drain when holding MegaShot
                 // (Dundr clone normally consumes Eitr; safe if UseEitr doesn't exist)
@@ -185,7 +185,7 @@ namespace MegaShot
                             _harmony.Patch(useEitrMethod, prefix: new HarmonyMethod(eitrPrefix));
                     }
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
             }
         }
 
@@ -208,7 +208,7 @@ namespace MegaShot
                 _configWatcher.NotifyFilter = NotifyFilters.LastWrite;
                 _configWatcher.EnableRaisingEvents = true;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
         }
 
         private void OnConfigFileChanged(object sender, FileSystemEventArgs e)
@@ -217,7 +217,7 @@ namespace MegaShot
             {
                 Config.Reload();
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
         }
 
         public static float GetEffectiveFireRate() => (float)FireRate.Value;
@@ -250,7 +250,7 @@ namespace MegaShot
                 if (changed)
                     File.WriteAllText(configPath, text.TrimEnd() + "\n");
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
         }
 
         private static bool MigrateCfgSection(ref string text, string oldName, string newName)

@@ -8,15 +8,23 @@ using System.IO;
 namespace MegaShot
 {
     // =========================================================================
-    // DIAGNOSTIC — writes ALT-fire hit info to Desktop\MegaShot_Diagnostic.txt.
-    // Controlled by config: 8. Diagnostic > Enabled (default: off).
+    // DIAGNOSTIC — writes ALT-fire hit info to BepInEx/MegaShot_Diagnostic.txt.
+    // Controlled by config: 8. Debug > Enabled (default: off).
     // Shows prefab names, component types, HP, tier for identifying fortress pieces.
     // =========================================================================
     public static class DiagnosticHelper
     {
-        private static readonly string LogPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-            "MegaShot_Diagnostic.txt");
+        private static string _logPath;
+
+        private static string LogPath
+        {
+            get
+            {
+                if (_logPath == null)
+                    _logPath = Path.Combine(BepInEx.Paths.BepInExRootPath, "MegaShot_Diagnostic.txt");
+                return _logPath;
+            }
+        }
 
         public static void Log(string message)
         {
@@ -24,6 +32,17 @@ namespace MegaShot
             {
                 if (!MegaShotPlugin.DebugMode.Value) return;
                 File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " " + message + "\n");
+            }
+            catch { }
+        }
+
+        /// <summary>Debug-only exception logging for catch blocks.</summary>
+        public static void LogException(string context, Exception ex)
+        {
+            try
+            {
+                if (!MegaShotPlugin.DebugMode.Value) return;
+                File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " [EX] " + context + ": " + ex.Message + "\n");
             }
             catch { }
         }
@@ -89,7 +108,7 @@ namespace MegaShot
                     if (scopeOverlay != null)
                         DrawScopeOverlay();
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             }
 
             if (!showHUD) return;
@@ -280,7 +299,7 @@ namespace MegaShot
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon))
                     return false;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
     }
@@ -299,7 +318,7 @@ namespace MegaShot
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon) && v > 0f)
                     return false;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
     }
@@ -323,7 +342,7 @@ namespace MegaShot
                     return false;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
 
@@ -342,7 +361,7 @@ namespace MegaShot
                     return false;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
     }
@@ -364,7 +383,7 @@ namespace MegaShot
                     return false;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
 
@@ -381,7 +400,7 @@ namespace MegaShot
                     return false;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
     }
@@ -405,7 +424,7 @@ namespace MegaShot
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon))
                     return false;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
     }
@@ -429,7 +448,7 @@ namespace MegaShot
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon))
                     return false; // suppress ALL ZLog.Log while crossbow is equipped
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
         }
     }
@@ -591,18 +610,18 @@ namespace MegaShot
                     || Console.IsVisible()
                     || StoreGui.IsVisible();
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             if (uiOpen)
             {
                 if (zooming) ResetZoom();
                 CrossbowHUD.showScope = false;
-                try { UpdateHUD(__instance, state); } catch { }
+                try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 return;
             }
 
             // === ZOOM (Right Mouse) ===
-            try { HandleZoom(); } catch { }
+            try { HandleZoom(); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             CrossbowHUD.showScope = zooming;
             CrossbowHUD.scopeZoomLevel = zoomLevel;
 
@@ -615,7 +634,7 @@ namespace MegaShot
                     state.magazineAmmo = MegaShotPlugin.GetEffectiveMagazineCapacity();
                     __instance.Message(MessageHud.MessageType.Center, "<color=green>RELOADED</color>");
                 }
-                try { UpdateHUD(__instance, state); } catch { }
+                try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 return;
             }
 
@@ -662,10 +681,10 @@ namespace MegaShot
                     if (cachedAnimator != null && cachedAnimator.speed > 1f)
                         cachedAnimator.speed = 1f;
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             }
 
-            try { UpdateHUD(__instance, state); } catch { }
+            try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         // ---- Zoom ----
@@ -711,7 +730,7 @@ namespace MegaShot
         private static void SetCamFloat(FieldInfo field, float value)
         {
             if (field == null || GameCamera.instance == null) return;
-            try { field.SetValue(GameCamera.instance, value); } catch { }
+            try { field.SetValue(GameCamera.instance, value); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         private static void HandleZoom()
@@ -794,7 +813,7 @@ namespace MegaShot
                 }
                 playerModelHidden = true;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         /// <summary>
@@ -816,7 +835,7 @@ namespace MegaShot
                 }
                 playerModelHidden = false;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         // ---- Fire ----
@@ -929,8 +948,8 @@ namespace MegaShot
 
             // Stagger / knockback
             float staggerMult = MegaShotPlugin.Stagger.Value;
-            try { hitData.m_pushForce = (weapon.m_shared?.m_attackForce ?? 0f) * staggerMult; } catch { }
-            try { hitData.m_staggerMultiplier = staggerMult; } catch { }
+            try { hitData.m_pushForce = (weapon.m_shared?.m_attackForce ?? 0f) * staggerMult; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            try { hitData.m_staggerMultiplier = staggerMult; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             // 6. Setup projectile (VERIFIED: 6-parameter overload, no ammo)
             // Ensure rigidbody is non-kinematic before Setup sets velocity
@@ -940,7 +959,7 @@ namespace MegaShot
                 if (rbSetup != null && rbSetup.isKinematic)
                     rbSetup.isKinematic = false;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             projectile.Setup(player, velocity, 0f, hitData, weapon, weapon);
 
             // Set tool tier AFTER Setup via reflection (Setup may overwrite from item data)
@@ -951,7 +970,7 @@ namespace MegaShot
                     var tierField = typeof(Projectile).GetField("m_toolTier", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                     if (tierField != null) tierField.SetValue(projectile, (short)9999);
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                 // Spawn HouseFire at impact point on ANY hit (if enabled)
                 if (MegaShotPlugin.HouseFireEnabled.Value)
@@ -968,7 +987,7 @@ namespace MegaShot
                                 }
                             }));
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 }
 
                 // Diagnostic: log component types on ALT-fire hit target to file
@@ -1002,17 +1021,17 @@ namespace MegaShot
                                 }
                                 DiagnosticHelper.Log(info);
                             }
-                            catch { }
+                            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                         }));
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             }
 
             // 7. AOE � we handle AOE ourselves in PatchCrossbowAOE (Character.Damage postfix)
             // so that splash emanates from the actual IMPACT POINT, not the bolt's transform.position.
             // Valheim's built-in m_aoe uses transform.position which at 940 m/s can be far past the hit.
             // Destroy mode AOE is handled separately by DestroyMineRock5Areas.
-            try { projectile.m_aoe = 0f; } catch { }
+            try { projectile.m_aoe = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             // 7b. Extend ZDO range � Valheim's zone system destroys network objects
             // beyond ~64-100m from the player. m_distant=true extends sync range,
@@ -1032,13 +1051,13 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             // 9. Physics - gravity and collision detection
             if (MegaShotPlugin.NoGravity.Value)
             {
                 // Projectile component gravity (Valheim's custom gravity system)
-                try { projectile.m_gravity = 0f; } catch { }
+                try { projectile.m_gravity = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             }
 
             // Always set CCD and Rigidbody for high-speed bolts
@@ -1057,7 +1076,7 @@ namespace MegaShot
                     rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             // 10. Animation - force restart at fire-rate speed so every shot shows
             try
@@ -1094,7 +1113,7 @@ namespace MegaShot
                         zanim.SetTrigger(attack.m_attackAnimation);
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             // 11. Adaptive sound system — two tiers based on fire rate:
             //     ≤15 rps: per-shot effects (all 3 Valheim fallback attempts, like vanilla)
@@ -1158,10 +1177,10 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             } // end top-level try
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         // ---- Sound Helpers ----
@@ -1179,11 +1198,23 @@ namespace MegaShot
             }
         }
 
+        private static readonly Dictionary<(Type, string), FieldInfo> _fieldCache = new Dictionary<(Type, string), FieldInfo>();
+        private static FieldInfo GetCachedField(Type type, string fieldName)
+        {
+            var key = (type, fieldName);
+            if (!_fieldCache.TryGetValue(key, out var fi))
+            {
+                fi = type.GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
+                _fieldCache[key] = fi;
+            }
+            return fi;
+        }
+
         private static bool TryPlayEffect(object source, string fieldName, Vector3 pos, Vector3 dir, Transform parent)
         {
             try
             {
-                var field = source.GetType().GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
+                var field = GetCachedField(source.GetType(), fieldName);
                 if (field == null) return false;
                 var el = field.GetValue(source) as EffectList;
                 if (el?.m_effectPrefabs == null || el.m_effectPrefabs.Length == 0) return false;
@@ -1230,7 +1261,7 @@ namespace MegaShot
                                 if (zsfx != null)
                                 {
                                     // ZSFX stores clips in m_audioClips
-                                    var clipsField = typeof(ZSFX).GetField("m_audioClips", BindingFlags.Public | BindingFlags.Instance);
+                                    var clipsField = GetCachedField(typeof(ZSFX), "m_audioClips");
                                     if (clipsField != null)
                                     {
                                         var clips = clipsField.GetValue(zsfx) as AudioClip[];
@@ -1241,7 +1272,7 @@ namespace MegaShot
                                     }
                                 }
                             }
-                            catch { }
+                            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                             // Try regular AudioSource
                             try
@@ -1252,11 +1283,11 @@ namespace MegaShot
                                     return audioSrc.clip;
                                 }
                             }
-                            catch { }
+                            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             }
             return null;
         }
@@ -1285,7 +1316,7 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return false;
         }
 
@@ -1396,7 +1427,7 @@ namespace MegaShot
                         return true;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return false;
         }
 
@@ -1421,7 +1452,7 @@ namespace MegaShot
                         diag += " tier=" + __instance.m_minToolTier;
                         DiagnosticHelper.Log(diag);
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                     if (canDestroy)
                     {
@@ -1472,7 +1503,7 @@ namespace MegaShot
                     hit.m_damage.m_fire = Mathf.Max(hit.m_damage.m_fire, fireDmg);
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         public static void Postfix(WearNTear __instance, HitData hit)
@@ -1487,11 +1518,11 @@ namespace MegaShot
                 {
                     wasWorldPieceDestroy = false;
                     try { __instance.m_damages = savedDamageModifiers; }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     try { DestroyObjectsHelper.ForceDestroyObject(__instance, "WearNTear(World)"); }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     try { DestroyObjectsHelper.TryAOEDestroy(hit, savedHitPoint); }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     return;
                 }
 
@@ -1516,61 +1547,89 @@ namespace MegaShot
                     ApplyFireSpread(__instance, spreadRadius, fireMult);
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         /// <summary>
         /// Try to trigger Ashlands fire behavior on a WearNTear piece via reflection.
         /// Ashlands added fire fields to WearNTear - we try to find and activate them.
+        /// Caches discovered method/field on first hit to avoid per-call reflection.
         /// </summary>
+        private static MethodInfo _cachedIgniteMethod;
+        private static bool _cachedIgniteIsBoolean;
+        private static bool _igniteMethodSearched;
+        private static FieldInfo _cachedDurationField;
+        private static bool _durationFieldSearched;
+
         private static void TryApplyAshlandsFire(WearNTear wnt)
         {
             try
             {
                 float durationMult = MegaShotPlugin.BuildingFireDuration.Value;
-
-                // Try to find and call fire-related methods on WearNTear
-                // Ashlands uses methods like "UpdateFire", "SetFire", or fields like "m_burning"
                 var wntType = typeof(WearNTear);
 
-                // Try to find a method to ignite the piece
-                string[] igniteMethods = { "Ignite", "SetFire", "StartFire", "RPC_Ignite" };
-                foreach (var methodName in igniteMethods)
+                // Discover ignite method once, cache for future calls
+                if (!_igniteMethodSearched)
                 {
-                    try
+                    _igniteMethodSearched = true;
+                    string[] igniteMethods = { "Ignite", "SetFire", "StartFire", "RPC_Ignite" };
+                    foreach (var methodName in igniteMethods)
                     {
                         var method = wntType.GetMethod(methodName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         if (method != null)
                         {
                             var parms = method.GetParameters();
-                            if (parms.Length == 0)
-                                method.Invoke(wnt, null);
-                            else if (parms.Length == 1 && parms[0].ParameterType == typeof(bool))
-                                method.Invoke(wnt, new object[] { true });
-                            break;
+                            if (parms.Length == 0 || (parms.Length == 1 && parms[0].ParameterType == typeof(bool)))
+                            {
+                                _cachedIgniteMethod = method;
+                                _cachedIgniteIsBoolean = parms.Length == 1;
+                                break;
+                            }
                         }
                     }
-                    catch { }
                 }
 
-                // Try to set fire duration fields
-                string[] durationFields = { "m_burnTime", "m_fireDuration", "m_burnDuration", "m_ashDamageTimer" };
-                foreach (var fieldName in durationFields)
+                // Invoke cached ignite method
+                if (_cachedIgniteMethod != null)
                 {
                     try
+                    {
+                        if (_cachedIgniteIsBoolean)
+                            _cachedIgniteMethod.Invoke(wnt, new object[] { true });
+                        else
+                            _cachedIgniteMethod.Invoke(wnt, null);
+                    }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                }
+
+                // Discover duration field once, cache for future calls
+                if (!_durationFieldSearched)
+                {
+                    _durationFieldSearched = true;
+                    string[] durationFields = { "m_burnTime", "m_fireDuration", "m_burnDuration", "m_ashDamageTimer" };
+                    foreach (var fieldName in durationFields)
                     {
                         var field = wntType.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
                         if (field != null && field.FieldType == typeof(float))
                         {
-                            float current = (float)field.GetValue(wnt);
-                            field.SetValue(wnt, current * durationMult);
+                            _cachedDurationField = field;
                             break;
                         }
                     }
-                    catch { }
+                }
+
+                // Apply duration multiplier via cached field
+                if (_cachedDurationField != null)
+                {
+                    try
+                    {
+                        float current = (float)_cachedDurationField.GetValue(wnt);
+                        _cachedDurationField.SetValue(wnt, current * durationMult);
+                    }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         /// <summary>
@@ -1606,7 +1665,7 @@ namespace MegaShot
                     if (spreadCount >= 10) break;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             finally
             {
                 isApplyingSpread = false;
@@ -1667,14 +1726,14 @@ namespace MegaShot
                     splashHit.m_point = character.GetCenterPoint();
                     splashHit.m_dir = (character.transform.position - impactPoint).normalized;
                     splashHit.m_skill = Skills.SkillType.None; // NOT Crossbows — prevents re-triggering AOE/DoT
-                    try { splashHit.m_pushForce = hit.m_pushForce; } catch { }
-                    try { splashHit.m_staggerMultiplier = hit.m_staggerMultiplier; } catch { }
-                    try { splashHit.SetAttacker(attacker); } catch { }
+                    try { splashHit.m_pushForce = hit.m_pushForce; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                    try { splashHit.m_staggerMultiplier = hit.m_staggerMultiplier; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                    try { splashHit.SetAttacker(attacker); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                     character.Damage(splashHit);
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             finally
             {
                 isApplyingAOE = false;
@@ -1747,7 +1806,7 @@ namespace MegaShot
                             dmgField.SetValue(se, dmg);
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                     // Also try float damage fields (other SE types)
                     string[] floatDmgFields = { "m_damagePerHit", "m_damagePerTick", "m_fireDamage", "m_poisonDamage" };
@@ -1763,11 +1822,11 @@ namespace MegaShot
                                     field.SetValue(se, val * dotMult);
                             }
                         }
-                        catch { }
+                        catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
 
@@ -1795,7 +1854,7 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
 
@@ -1848,7 +1907,7 @@ namespace MegaShot
                     return;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             finally
             {
                 DestroyObjectsHelper.isDestroyingAreas = false;
@@ -1866,7 +1925,7 @@ namespace MegaShot
                 if (nview != null && nview.IsValid() && !nview.IsOwner())
                     nview.ClaimOwnership();
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             // Find DamageArea(int hitAreaIndex, HitData hit) � the internal method
             // that directly damages a specific area by index, synchronously.
@@ -1996,7 +2055,7 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return null;
         }
 
@@ -2015,7 +2074,7 @@ namespace MegaShot
                     foreach (var item in pair.Value) list.Add(item);
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         /// <summary>
@@ -2091,7 +2150,7 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             try
             {
@@ -2108,7 +2167,7 @@ namespace MegaShot
                     nview.Destroy();
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         /// <summary>
@@ -2192,7 +2251,7 @@ namespace MegaShot
                     UnityEngine.Object.Destroy(target.gameObject);
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         /// <summary>
@@ -2262,7 +2321,7 @@ namespace MegaShot
                             continue;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                     // --- MineRock: defer destruction to next frame ---
                     try
@@ -2281,7 +2340,7 @@ namespace MegaShot
                             continue;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                     // --- Trees ---
                     try
@@ -2297,7 +2356,7 @@ namespace MegaShot
                             continue;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     try
                     {
                         var log = go.GetComponentInParent<TreeLog>();
@@ -2311,7 +2370,7 @@ namespace MegaShot
                             continue;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     try
                     {
                         var dest = go.GetComponentInParent<Destructible>();
@@ -2325,7 +2384,7 @@ namespace MegaShot
                             continue;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     // Buildings: only destroy specific world pieces (doors, stairs) in AOE
                     try
                     {
@@ -2340,10 +2399,10 @@ namespace MegaShot
                             continue;
                         }
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             finally
             {
                 isApplyingAOE = false;
@@ -2377,7 +2436,7 @@ namespace MegaShot
                 // damages stone, black marble, grausten, etc.
                 ForceBurnableNearby(position);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         private static void ForceBurnableNearby(Vector3 position)
@@ -2398,7 +2457,7 @@ namespace MegaShot
                     wnt.m_burnable = true;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         private static void FindFirePrefab()
@@ -2451,7 +2510,7 @@ namespace MegaShot
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         private static void CacheFirePrefab(GameObject prefab)
@@ -2474,14 +2533,14 @@ namespace MegaShot
                     savedImpactPoint = hit.m_point;
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
         public static void Postfix(TreeBase __instance, HitData hit)
         {
             try { DestroyObjectsHelper.ForceDestroyIfNeeded(__instance, hit, "TreeBase"); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             try { DestroyObjectsHelper.TryAOEDestroy(hit, savedImpactPoint); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
 
@@ -2499,14 +2558,14 @@ namespace MegaShot
                     savedImpactPoint = hit.m_point;
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
         public static void Postfix(TreeLog __instance, HitData hit)
         {
             try { DestroyObjectsHelper.ForceDestroyIfNeeded(__instance, hit, "TreeLog"); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             try { DestroyObjectsHelper.TryAOEDestroy(hit, savedImpactPoint); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
 
@@ -2538,11 +2597,11 @@ namespace MegaShot
                         diag += " tier=" + __instance.m_minToolTier;
                         DiagnosticHelper.Log(diag);
                     }
-                    catch { }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 }
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
         public static void Postfix(Destructible __instance, HitData hit)
         {
@@ -2554,11 +2613,11 @@ namespace MegaShot
                     __instance.m_damages = savedModifiers;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             try { DestroyObjectsHelper.ForceDestroyIfNeeded(__instance, hit, "Destructible"); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             try { DestroyObjectsHelper.TryAOEDestroy(hit, savedImpactPoint); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
 
@@ -2578,7 +2637,7 @@ namespace MegaShot
                     savedImpactPoint = hit.m_point;
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
         public static void Postfix(MineRock __instance, HitData hit)
         {
@@ -2586,11 +2645,11 @@ namespace MegaShot
             {
                 if (DestroyObjectsHelper.isDeferredDamage) return;
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             try { DestroyObjectsHelper.ForceDestroyIfNeeded(__instance, hit, "MineRock"); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             try { DestroyObjectsHelper.TryAOEDestroy(hit, savedImpactPoint); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
 
@@ -2620,7 +2679,7 @@ namespace MegaShot
                 }
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
         public static void Postfix(MineRock5 __instance, HitData hit)
         {
@@ -2635,13 +2694,13 @@ namespace MegaShot
                     __instance.m_damageModifiers = savedModifiers;
                 }
             }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             // Fracture sub-areas using the ORIGINAL bolt impact point, not the modified hit.m_point.
             try { DestroyObjectsHelper.DestroyMineRock5Areas(__instance, hit, savedImpactPoint); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             // AOE destroy adjacent objects (trees, other rocks, etc.)
             try { DestroyObjectsHelper.TryAOEDestroy(hit, savedImpactPoint); }
-            catch { }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
 }
