@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.3.5";
+        public const string PluginVersion = "2.3.6";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -52,6 +52,9 @@ namespace MegaShot
         public static ConfigEntry<float> BuildingDamage;
         public static ConfigEntry<float> BuildingFireDamage;
         public static ConfigEntry<float> BuildingFireDuration;
+
+        // Fish Catching
+        public static ConfigEntry<bool> FishCatching;
 
         // HouseFire
         public static ConfigEntry<bool> HouseFireEnabled;
@@ -123,12 +126,16 @@ namespace MegaShot
             BuildingFireDuration = Config.Bind("6. Building Damage", "BuildingFireDuration", 1f, 
                 new ConfigDescription("How long buildings burn (1 = normal Ashlands duration, 10 = 10x duration)", new AcceptableValueRange<float>(1f, 10f)));
 
+            // Fish Catching (ALT-mode fish auto-loot)
+            FishCatching = Config.Bind("7. Fish Catching", "Enabled", true,
+                "ALT-fire catches fish on hit: adds to inventory as level 5, grants fishing skill point");
+
             // HouseFire (ALT-mode fire spawned on impact)
-            HouseFireEnabled = Config.Bind("7. HouseFire", "Enabled", false,
+            HouseFireEnabled = Config.Bind("8. HouseFire", "Enabled", false,
                 "Enable HouseFire spawning in ALT mode (set to false to disable fire on impact)");
 
             // Debug
-            DebugMode = Config.Bind("8. Debug", "Enabled", false,
+            DebugMode = Config.Bind("9. Debug", "Enabled", false,
                 "Write ALT-fire hit diagnostics to Desktop\\MegaShot_Diagnostic.txt (prefab names, component types, HP, tier)");
 
             // Watch config file for live reload on save
@@ -244,8 +251,11 @@ namespace MegaShot
                 changed |= MigrateCfgSection(ref text, "Damage", "4. Damage");
                 changed |= MigrateCfgSection(ref text, "AOE", "5. AOE");
                 changed |= MigrateCfgSection(ref text, "Building Damage", "6. Building Damage");
-                changed |= MigrateCfgSection(ref text, "HouseFire", "7. HouseFire");
-                changed |= MigrateCfgSection(ref text, "Debug", "8. Debug");
+                changed |= MigrateCfgSection(ref text, "Fish Catching", "7. Fish Catching");
+                changed |= MigrateCfgSection(ref text, "7. HouseFire", "8. HouseFire");
+                changed |= MigrateCfgSection(ref text, "HouseFire", "8. HouseFire");
+                changed |= MigrateCfgSection(ref text, "8. Debug", "9. Debug");
+                changed |= MigrateCfgSection(ref text, "Debug", "9. Debug");
 
                 if (changed)
                     File.WriteAllText(configPath, text.TrimEnd() + "\n");

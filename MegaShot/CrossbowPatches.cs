@@ -1025,6 +1025,73 @@ namespace MegaShot
                         }));
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+
+                // Fish catching: ALT-fire on a fish catches it at level 5, grants fishing skill
+                if (MegaShotPlugin.FishCatching.Value)
+                {
+                    try
+                    {
+                        projectile.m_onHit = (OnProjectileHit)System.Delegate.Combine(
+                            projectile.m_onHit,
+                            new OnProjectileHit((Collider col, Vector3 hitPoint, bool water) =>
+                            {
+                                try
+                                {
+                                    if (col == null) return;
+
+                                    Fish fish = col.GetComponentInParent<Fish>();
+                                    if (fish == null) return;
+
+                                    Player localPlayer = Player.m_localPlayer;
+                                    if (localPlayer == null) return;
+
+                                    // Fish objects carry an ItemDrop component with the pickup item
+                                    ItemDrop itemDrop = fish.gameObject.GetComponent<ItemDrop>();
+                                    if (itemDrop?.m_itemData?.m_shared == null) return;
+
+                                    // Set quality to creature level 5
+                                    int maxQuality = itemDrop.m_itemData.m_shared.m_maxQuality > 0
+                                        ? itemDrop.m_itemData.m_shared.m_maxQuality
+                                        : 5;
+                                    itemDrop.m_itemData.m_quality = Mathf.Min(5, maxQuality);
+
+                                    // Add to player inventory
+                                    Inventory inv = localPlayer.GetInventory();
+                                    if (inv == null) return;
+
+                                    if (!inv.AddItem(itemDrop.m_itemData))
+                                    {
+                                        localPlayer.Message(MessageHud.MessageType.Center, "$inventory_full");
+                                        return;
+                                    }
+
+                                    // Raise fishing skill by 1 point (no-op if already maxed)
+                                    try { localPlayer.RaiseSkill(Skills.SkillType.Fishing, 1f); }
+                                    catch { }
+
+                                    // Standard pickup message (top-left with icon)
+                                    localPlayer.Message(MessageHud.MessageType.TopLeft,
+                                        "$msg_added " + itemDrop.m_itemData.m_shared.m_name,
+                                        1, itemDrop.m_itemData.GetIcon());
+
+                                    // Remove the fish from the world
+                                    ZNetView nview = fish.GetComponent<ZNetView>();
+                                    if (nview == null) nview = fish.GetComponentInParent<ZNetView>();
+                                    if (nview != null && nview.IsValid())
+                                    {
+                                        nview.ClaimOwnership();
+                                        nview.Destroy();
+                                    }
+                                    else
+                                    {
+                                        UnityEngine.Object.Destroy(fish.gameObject);
+                                    }
+                                }
+                                catch (Exception ex) { DiagnosticHelper.LogException("FishCatch", ex); }
+                            }));
+                    }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                }
             }
 
             // 7. AOE � we handle AOE ourselves in PatchCrossbowAOE (Character.Damage postfix)
@@ -1198,10 +1265,10 @@ namespace MegaShot
             }
         }
 
-        private static readonly Dictionary<(Type, string), FieldInfo> _fieldCache = new Dictionary<(Type, string), FieldInfo>();
+        private static readonly Dictionary<string, FieldInfo> _fieldCache = new Dictionary<string, FieldInfo>();
         private static FieldInfo GetCachedField(Type type, string fieldName)
         {
-            var key = (type, fieldName);
+            var key = type.FullName + "." + fieldName;
             if (!_fieldCache.TryGetValue(key, out var fi))
             {
                 fi = type.GetField(fieldName, BindingFlags.Public | BindingFlags.Instance);
