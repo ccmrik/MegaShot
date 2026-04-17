@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.3.6";
+        public const string PluginVersion = "2.4.0";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -134,8 +134,8 @@ namespace MegaShot
             HouseFireEnabled = Config.Bind("8. HouseFire", "Enabled", false,
                 "Enable HouseFire spawning in ALT mode (set to false to disable fire on impact)");
 
-            // Debug
-            DebugMode = Config.Bind("9. Debug", "Enabled", false,
+            // 99. Debug — standardised section + key across all Mega mods (v2.4.0+)
+            DebugMode = Config.Bind("99. Debug", "DebugMode", false,
                 "Write ALT-fire hit diagnostics to Desktop\\MegaShot_Diagnostic.txt (prefab names, component types, HP, tier)");
 
             // Watch config file for live reload on save
@@ -254,8 +254,11 @@ namespace MegaShot
                 changed |= MigrateCfgSection(ref text, "Fish Catching", "7. Fish Catching");
                 changed |= MigrateCfgSection(ref text, "7. HouseFire", "8. HouseFire");
                 changed |= MigrateCfgSection(ref text, "HouseFire", "8. HouseFire");
-                changed |= MigrateCfgSection(ref text, "8. Debug", "9. Debug");
-                changed |= MigrateCfgSection(ref text, "Debug", "9. Debug");
+                changed |= MigrateCfgSection(ref text, "8. Debug", "99. Debug");
+                changed |= MigrateCfgSection(ref text, "9. Debug", "99. Debug");
+                changed |= MigrateCfgSection(ref text, "Debug", "99. Debug");
+                // Rename legacy key `Enabled = X` → `DebugMode = X` inside the debug section.
+                changed |= RenameKeyInSection(ref text, "99. Debug", "Enabled", "DebugMode");
 
                 if (changed)
                     File.WriteAllText(configPath, text.TrimEnd() + "\n");
@@ -282,6 +285,34 @@ namespace MegaShot
             {
                 text = text.Remove(idx, oldHeader.Length).Insert(idx, "[" + newName + "]");
             }
+            return true;
+        }
+
+        /// <summary>
+        /// Rename a key inside a specific section. Used to migrate `Enabled = X`
+        /// under `[99. Debug]` to the new standard `DebugMode = X`.
+        /// </summary>
+        private static bool RenameKeyInSection(ref string text, string section, string oldKey, string newKey)
+        {
+            string header = "[" + section + "]";
+            int sectionIdx = text.IndexOf(header, StringComparison.OrdinalIgnoreCase);
+            if (sectionIdx < 0) return false;
+            int sectionStart = sectionIdx + header.Length;
+            int sectionEnd = text.IndexOf("\n[", sectionStart, StringComparison.Ordinal);
+            if (sectionEnd < 0) sectionEnd = text.Length;
+
+            string before = text.Substring(0, sectionStart);
+            string body = text.Substring(sectionStart, sectionEnd - sectionStart);
+            string after = text.Substring(sectionEnd);
+
+            string newBody = System.Text.RegularExpressions.Regex.Replace(
+                body,
+                "(^|\\n)[ \\t]*" + System.Text.RegularExpressions.Regex.Escape(oldKey) + "[ \\t]*=",
+                "$1" + newKey + " =",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+            if (newBody == body) return false;
+            text = before + newBody + after;
             return true;
         }
     }
