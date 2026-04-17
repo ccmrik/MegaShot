@@ -1,52 +1,36 @@
 # MegaShot Build and Deploy Script
-# This script builds the mod and copies it to the plugin folder
+# Builds Release and stages the DLL in Latest Release/MegaShot/ for GitHub upload.
+# Profile copy step removed — MegaLoad's auto-updater handles delivery once the
+# GitHub release is published and mod-manifest.json is updated.
 
 Write-Host "==================================" -ForegroundColor Cyan
 Write-Host " MegaShot Build & Deploy" -ForegroundColor Cyan
 Write-Host "==================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Build the project
 Write-Host "Building project..." -ForegroundColor Yellow
 dotnet build MegaShot\MegaShot.csproj --configuration Release
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "`n? Build failed! Check errors above." -ForegroundColor Red
+    Write-Host "`nBuild failed! Check errors above." -ForegroundColor Red
     exit 1
 }
 
-Write-Host "`n? Build successful!" -ForegroundColor Green
+Write-Host "`nBuild successful!" -ForegroundColor Green
 
 $srcDll = "MegaShot\bin\Release\net462\MegaShot.dll"
-$pluginDir = "C:\Users\Rik\AppData\Roaming\r2modmanPlus-local\Valheim\profiles\Valheim Min Mods\BepInEx\plugins\MegaShot"
-$pluginPath = Join-Path $pluginDir "MegaShot.dll"
+$releaseDir = "..\Latest Release\MegaShot"
+$releasePath = Join-Path $releaseDir "MegaShot.dll"
 
-# Ensure plugin directory exists
-if (!(Test-Path $pluginDir)) { New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null }
+if (!(Test-Path $releaseDir)) { New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null }
 
-# Try to deploy, retry with alert if file is locked
-$deployed = $false
-while (-not $deployed) {
-    try {
-        Copy-Item $srcDll $pluginPath -Force -ErrorAction Stop
-        $deployed = $true
-    } catch {
-        Write-Host ""
-        Write-Host "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" -ForegroundColor Red
-        Write-Host "  DEPLOY FAILED - DLL is locked!" -ForegroundColor Red
-        Write-Host "  Close Valheim / log out first, then try again." -ForegroundColor Yellow
-        Write-Host "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" -ForegroundColor Red
-        [Console]::Beep(1000, 300); [Console]::Beep(1000, 300); [Console]::Beep(1000, 300)
-        Write-Host ""
-        Read-Host "Press ENTER to retry deploy"
-    }
-}
+Copy-Item $srcDll $releasePath -Force
 
-$fileInfo = Get-Item $pluginPath
-Write-Host "? Plugin deployed: $pluginPath" -ForegroundColor Green
+$fileInfo = Get-Item $releasePath
+Write-Host "Staged for release: $releasePath" -ForegroundColor Green
 Write-Host "  File size: $($fileInfo.Length) bytes" -ForegroundColor Gray
 Write-Host "  Modified: $($fileInfo.LastWriteTime)" -ForegroundColor Gray
 Write-Host ""
-Write-Host "Ready to test in game! Launch Valheim through r2modman." -ForegroundColor Cyan
+Write-Host "Next: gh release create vX.Y.Z `"$releasePath`" --repo ccmrik/MegaShot" -ForegroundColor Cyan
+Write-Host "      then bump MegaLoad/mod-manifest.json and upload to the MegaLoad release." -ForegroundColor Cyan
 Write-Host ""
-

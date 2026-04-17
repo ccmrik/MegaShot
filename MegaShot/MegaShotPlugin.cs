@@ -12,8 +12,8 @@ namespace MegaShot
     public class MegaShotPlugin : BaseUnityPlugin
     {
         public const string PluginGUID = "com.rikal.megashot";
-        public const string PluginName = "MegaShot";
-        public const string PluginVersion = "2.4.0";
+        public const string PluginName = "Mega Shot";
+        public const string PluginVersion = "2.4.1";
 
         // General
         public static ConfigEntry<bool> ModEnabled;

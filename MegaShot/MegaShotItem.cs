@@ -10,6 +10,7 @@ namespace MegaShot
     internal static class MegaShotLog
     {
         internal static ManualLogSource Log = BepInEx.Logging.Logger.CreateLogSource("MegaShot.Item");
+        internal static void Debug(string msg) { if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value) Log.LogInfo(msg); }
     }
 
     /// <summary>
@@ -90,11 +91,11 @@ namespace MegaShot
 
             if (!alreadyInObjectDB)
             {
-                MegaShotLog.Log.LogInfo("MegaShot prefab not in ObjectDB yet, creating...");
+                MegaShotLog.Debug("MegaShot prefab not in ObjectDB yet, creating...");
                 CreatePrefab(objectDB);
                 if (megaShotPrefab == null)
                 {
-                    MegaShotLog.Log.LogInfo("Deferred — StaffLightning not available yet (will retry on CopyOtherDB)");
+                    MegaShotLog.Debug("Deferred — StaffLightning not available yet (will retry on CopyOtherDB)");
                     return;
                 }
 
@@ -107,7 +108,7 @@ namespace MegaShot
             }
             else
             {
-                MegaShotLog.Log.LogInfo("MegaShot prefab already in ObjectDB, ensuring hash registration");
+                MegaShotLog.Debug("MegaShot prefab already in ObjectDB, ensuring hash registration");
                 // Always re-register in hash map — CopyOtherDB may reset it
                 RegisterInHashMap(objectDB);
             }
@@ -230,7 +231,7 @@ namespace MegaShot
 
                 // Register in ObjectDB
                 objectDB.m_items.Add(megaShotPrefab);
-                MegaShotLog.Log.LogInfo("Added MegaShot prefab to ObjectDB.m_items");
+                MegaShotLog.Debug("Added MegaShot prefab to ObjectDB.m_items");
 
                 // Direct hash registration — belt-and-suspenders with UpdateRegisters
                 RegisterInHashMap(objectDB);
@@ -243,7 +244,7 @@ namespace MegaShot
                     if (updateMethod != null)
                     {
                         updateMethod.Invoke(objectDB, null);
-                        MegaShotLog.Log.LogInfo("UpdateRegisters() called successfully");
+                        MegaShotLog.Debug("UpdateRegisters() called successfully");
                     }
                     else
                     {
@@ -268,7 +269,7 @@ namespace MegaShot
                     if (dict != null)
                     {
                         dict[hash] = megaShotPrefab;
-                        MegaShotLog.Log.LogInfo($"Registered MegaShot in m_itemByHash (hash={hash})");
+                        MegaShotLog.Debug($"Registered MegaShot in m_itemByHash (hash={hash})");
                     }
                     else
                     {
@@ -547,7 +548,7 @@ namespace MegaShot
             try
             {
                 if (!MegaShotPlugin.ModEnabled.Value) return;
-                MegaShotLog.Log.LogInfo("ObjectDB.Awake Postfix — registering MegaShot");
+                MegaShotLog.Debug("ObjectDB.Awake Postfix — registering MegaShot");
                 MegaShotItem.Register(__instance);
             }
             catch (Exception ex) { MegaShotLog.Log.LogError($"ObjectDB.Awake Postfix failed: {ex}"); }
@@ -563,7 +564,7 @@ namespace MegaShot
             try
             {
                 if (!MegaShotPlugin.ModEnabled.Value) return;
-                MegaShotLog.Log.LogInfo("ObjectDB.CopyOtherDB Postfix — re-registering MegaShot");
+                MegaShotLog.Debug("ObjectDB.CopyOtherDB Postfix — re-registering MegaShot");
                 MegaShotItem.Register(__instance);
             }
             catch (Exception ex) { MegaShotLog.Log.LogError($"CopyOtherDB Postfix failed: {ex}"); }
