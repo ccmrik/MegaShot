@@ -3395,6 +3395,15 @@ namespace MegaShot
             return UnityEngine.Time.time - lastBeamActiveTime <= ActiveWindowSec;
         }
 
+        // Tighter window for FX suppression — we only want cosmetic VFX / SFX
+        // muted while the beam is actually firing (plus a couple of frames of
+        // grace for in-flight destroy calls). Drop suppression uses the wider
+        // 5s window because drops can spawn a second or two after Damage().
+        public static bool IsBeamFiringNow()
+        {
+            return UnityEngine.Time.time - lastBeamActiveTime <= 0.3f;
+        }
+
         public static bool IsJunkItem(ItemDrop drop)
         {
             try
@@ -3455,6 +3464,38 @@ namespace MegaShot
                 ArmageddonSuppression.TryDestroyDrop(__instance);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+    }
+
+    // =========================================================================
+    // ARMAGEDDON FX SUPPRESSION
+    // Dense rock clusters under a large AOE spawn hundreds of m_hitEffect /
+    // m_destroyedEffect prefabs per second (dust puffs, splinters, sounds,
+    // lights). At 30 Hz damage ticks this can freeze the game. While the beam
+    // is actively firing (or within the 5 s grace window), short-circuit
+    // EffectList.Create so those prefabs never instantiate. The beam's own
+    // bloom + particles + impact flash carry the visual load.
+    // =========================================================================
+    [HarmonyPatch(typeof(EffectList), "Create")]
+    public static class PatchArmageddonSuppressFx
+    {
+        public static bool Prefix(ref GameObject[] __result)
+        {
+            try
+            {
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
+                if (!MegaShotPlugin.ArmageddonEnabled.Value) return true;
+                if (!MegaShotPlugin.ArmageddonSuppressFx.Value) return true;
+                if (!ArmageddonSuppression.IsBeamFiringNow()) return true;
+
+                __result = System.Array.Empty<GameObject>();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                DiagnosticHelper.LogException("MegaShot", ex);
+                return true;
+            }
         }
     }
 }

@@ -67,6 +67,7 @@ namespace MegaShot
         public static ConfigEntry<bool> ArmageddonLaserSound;
         public static ConfigEntry<int> ArmageddonLaserVolume;
         public static ConfigEntry<bool> ArmageddonSuppressDrops;
+        public static ConfigEntry<bool> ArmageddonSuppressFx;
 
         // Debug
         public static ConfigEntry<bool> DebugMode;
@@ -160,6 +161,8 @@ namespace MegaShot
                 new ConfigDescription("Volume of the Armageddon laser hum as a percentage (0 = silent, 100 = max)", new AcceptableValueRange<int>(0, 100)));
             ArmageddonSuppressDrops = Config.Bind("9. Armageddon Mode", "SuppressDrops", true,
                 "Delete resource drops (stone, wood, flint, resin, etc.) spawned by objects destroyed in Armageddon Mode. They never hit the ground.");
+            ArmageddonSuppressFx = Config.Bind("9. Armageddon Mode", "SuppressFx", true,
+                "Skip vanilla destroy/hit VFX while the beam is firing. Huge perf win in dense rock clusters with large AOE — the beam's own glow + impact flash do the visual work. Disable if you want individual per-rock dust puffs.");
 
             // 99. Debug — standardised section + key across all Mega mods (v2.4.0+)
             DebugMode = Config.Bind("99. Debug", "DebugMode", false,

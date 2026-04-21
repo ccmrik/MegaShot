@@ -5,6 +5,11 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.6] - 2026-04-22
+
+### Added
+- **Armageddon FX suppression** — huge perf win in dense rock clusters with large AOE. While the beam is actively firing, a Harmony Prefix on `EffectList.Create` short-circuits all vanilla hit/destroy VFX + SFX prefab instantiation (`m_hitEffect`, `m_destroyedEffect`, splinter dust, etc.). The beam's own bloom, motes, and impact flash already read as "things are exploding"; the vanilla per-rock puffs were purely cosmetic and were spawning hundreds of prefabs per second in big Mistlands rock clusters, freezing the game. Gated on a tight 0.3 s window so unrelated world FX resume immediately after releasing the trigger. New config `SuppressFx` (bool, default `true`) in section `9. Armageddon Mode` — turn off if you want per-rock dust puffs back.
+
 ## [2.6.5] - 2026-04-22
 
 ### Changed
