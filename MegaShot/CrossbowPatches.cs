@@ -514,6 +514,12 @@ namespace MegaShot
         // the throttle. Frame-rate independent at a visually smooth cadence.
         private const float BEAM_TICK_RATE = 30f;
 
+        // Beam particles: tiny glowing motes along the beam path so it reads as
+        // ionised energy rather than a solid line. World-space sim, short life,
+        // perpendicular drift. Hand-emitted each frame along the ray.
+        private static ParticleSystem beamParticles;
+        private static GameObject beamParticlesObj;
+
         // HUD throttle
         private static float lastHudUpdate = 0f;
 
@@ -1418,8 +1424,135 @@ namespace MegaShot
             try
             {
                 if (beamLine != null) beamLine.enabled = false;
+                if (beamParticles != null) beamParticles.Stop(false, ParticleSystemStopBehavior.StopEmitting);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        private static void EnsureBeamParticles()
+        {
+            if (beamParticles != null && beamParticlesObj != null) return;
+
+            beamParticlesObj = new GameObject("MegaShotArmageddonBeamParticles");
+            UnityEngine.Object.DontDestroyOnLoad(beamParticlesObj);
+            beamParticles = beamParticlesObj.AddComponent<ParticleSystem>();
+
+            // Disable auto-emission — we hand-emit along the beam each frame.
+            var emission = beamParticles.emission;
+            emission.enabled = false;
+
+            var main = beamParticles.main;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.startLifetime = 0.35f;
+            main.startSize = 0.04f;
+            main.startSpeed = 0f;
+            main.maxParticles = 400;
+            main.playOnAwake = false;
+            main.loop = true;
+            main.startColor = new Color(1f, 0.35f, 0.1f, 0.9f);
+
+            var shape = beamParticles.shape;
+            shape.enabled = false; // positions come from EmitParams
+
+            // Fade out over life.
+            var colourOverLife = beamParticles.colorOverLifetime;
+            colourOverLife.enabled = true;
+            var grad = new Gradient();
+            grad.SetKeys(
+                new[] {
+                    new GradientColorKey(new Color(1f, 0.6f, 0.2f), 0f),
+                    new GradientColorKey(new Color(1f, 0.15f, 0.05f), 1f)
+                },
+                new[] {
+                    new GradientAlphaKey(1f, 0f),
+                    new GradientAlphaKey(0f, 1f)
+                });
+            colourOverLife.color = new ParticleSystem.MinMaxGradient(grad);
+
+            // Shrink as they die.
+            var sizeOverLife = beamParticles.sizeOverLifetime;
+            sizeOverLife.enabled = true;
+            var curve = new AnimationCurve(
+                new Keyframe(0f, 1f),
+                new Keyframe(1f, 0.2f));
+            sizeOverLife.size = new ParticleSystem.MinMaxCurve(1f, curve);
+
+            var renderer = beamParticles.GetComponent<ParticleSystemRenderer>();
+            if (renderer != null)
+            {
+                // Sprites/Default works as an additive-ish billboarded point with vertex alpha.
+                var shader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color");
+                renderer.material = new Material(shader);
+                renderer.renderMode = ParticleSystemRenderMode.Billboard;
+                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                renderer.receiveShadows = false;
+            }
+
+            beamParticles.Play();
+        }
+
+        /// <summary>
+        /// Hand-emit a handful of particles per frame scattered along the beam.
+        /// Positions jitter perpendicular to the beam so the motes hug it loosely;
+        /// velocities drift outward + slightly upward for a floaty ember feel.
+        /// Size is scoped so it doesn't balloon through the scope's magnified FOV.
+        /// </summary>
+        private static void EmitBeamParticles(Vector3 origin, Vector3 endPoint, float flash, float widthScale)
+        {
+            if (beamParticles == null) return;
+
+            Vector3 dir = endPoint - origin;
+            float len = dir.magnitude;
+            if (len < 0.1f) return;
+
+            Vector3 fwd = dir / len;
+            Vector3 right = Vector3.Cross(fwd, Vector3.up);
+            if (right.sqrMagnitude < 0.0001f) right = Vector3.Cross(fwd, Vector3.right);
+            right.Normalize();
+            Vector3 up = Vector3.Cross(right, fwd).normalized;
+
+            // Scale particle count with beam length so distant beams still look populated,
+            // but cap so 500m beams don't melt perf.
+            int count = Mathf.Clamp(Mathf.RoundToInt(len * 0.25f) + 4, 4, 24);
+            // Hit flash boosts particle count briefly for an extra burst of sparks.
+            if (flash > 0f) count += Mathf.RoundToInt(flash * 12f);
+
+            // Perpendicular jitter tied to distance so nearby beams keep motes tight.
+            float perpScale = Mathf.Lerp(0.015f, 0.08f, Mathf.Clamp01(len / 120f));
+
+            var emit = new ParticleSystem.EmitParams();
+            emit.applyShapeToPosition = false;
+
+            for (int i = 0; i < count; i++)
+            {
+                float t = UnityEngine.Random.value;
+                Vector3 basePos = Vector3.Lerp(origin, endPoint, t);
+                float jr = (UnityEngine.Random.value - 0.5f) * 2f;
+                float ju = (UnityEngine.Random.value - 0.5f) * 2f;
+                Vector3 offset = right * (jr * perpScale) + up * (ju * perpScale);
+                emit.position = basePos + offset;
+
+                // Drift outward from the beam (so motes look like they peel off) +
+                // a gentle upward bias (hot air rising).
+                Vector3 vel = (right * jr + up * (ju + 0.4f)) * 0.35f;
+                emit.velocity = vel;
+
+                // Size scoped + slight randomisation + flash swell.
+                float sz = 0.03f * widthScale * (0.7f + UnityEngine.Random.value * 0.8f);
+                sz *= 1f + flash * 1.2f;
+                emit.startSize = sz;
+
+                emit.startLifetime = 0.25f + UnityEngine.Random.value * 0.25f;
+
+                // Near the impact point, skew brighter/yellow-white for a sparking feel.
+                float heat = Mathf.Clamp01(t * 1.2f - 0.2f) * (0.5f + flash);
+                emit.startColor = Color.Lerp(
+                    new Color(1f, 0.35f, 0.1f, 0.9f),
+                    new Color(1f, 0.85f, 0.5f, 1f),
+                    heat);
+
+                beamParticles.Emit(emit, 1);
+            }
         }
 
         /// <summary>
@@ -1448,6 +1581,7 @@ namespace MegaShot
                 }
 
                 EnsureBeamRenderer();
+                EnsureBeamParticles();
                 if (beamLine == null) return;
 
                 // Find impact point (or the far end of the ray when nothing is hit).
@@ -1520,6 +1654,9 @@ namespace MegaShot
                 }
                 beamLine.SetPositions(beamPositions);
                 beamLine.enabled = true;
+
+                // Seed energy motes along the beam — matches width scope-compensation.
+                EmitBeamParticles(origin, endPoint, flash, widthScale);
 
                 // Damage ticks at a fixed constant rate — no longer gated by FireRate config.
                 float interval = 1f / BEAM_TICK_RATE;

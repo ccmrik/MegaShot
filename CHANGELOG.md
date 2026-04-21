@@ -5,6 +5,11 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.4] - 2026-04-21
+
+### Added
+- **Beam energy motes** — a `ParticleSystem` now seeds tiny glowing particles along the beam's length every frame. Short life (~0.3 s), perpendicular drift outward from the beam plus a small upward rise, orange→dark-red fade with shrink-over-life. Count scales with beam length (4–24 per frame, capped) and gets an extra burst while the hit flash is active. Size is scope-compensated so they don't bloat through the scope's FOV. Cleans up when the beam stops.
+
 ## [2.6.3] - 2026-04-21
 
 ### Added
