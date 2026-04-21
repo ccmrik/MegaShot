@@ -5,6 +5,12 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.5] - 2026-04-22
+
+### Changed
+- **Armageddon drop suppression now time-gated, not proximity-gated.** Previously the suppressor swallowed junk drops only if they spawned within a radius of the raw beam impact (AOE + 5 m, plus the hit object's root bounds). That missed plenty of stone from Mistlands / Plains / Ashlands rocks, MineRock5 ore veins, and AOE cascades that dumped drops far outside the registered circles. It now suppresses all listed junk drops (stone, wood variants, resin, flint, branches, sticks, feathers) worldwide for 5 seconds after the beam last drew. No proximity check.
+- **Prefab-name fallback** in `ArmageddonSuppression.IsJunkItem` — matches against the GameObject name (strips `(Clone)` suffix) in case `m_shared.m_name` isn't populated yet at `Awake` time for a given drop.
+
 ## [2.6.4] - 2026-04-21
 
 ### Added

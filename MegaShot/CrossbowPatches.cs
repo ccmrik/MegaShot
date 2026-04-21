@@ -1658,6 +1658,12 @@ namespace MegaShot
                 // Seed energy motes along the beam — matches width scope-compensation.
                 EmitBeamParticles(origin, endPoint, flash, widthScale);
 
+                // Stamp the beam-active timestamp so the drop suppressor swallows
+                // junk drops (stone/wood/etc.) that spawn anywhere in the world for
+                // the next few seconds — covers cascading AOE chains and MineRock5
+                // sub-area fractures whose drops scatter well past the raw impact.
+                ArmageddonSuppression.MarkBeamActive();
+
                 // Damage ticks at a fixed constant rate — no longer gated by FireRate config.
                 float interval = 1f / BEAM_TICK_RATE;
                 if (Time.time - lastBeamTickTime < interval) return;
@@ -1709,29 +1715,6 @@ namespace MegaShot
                 if (hit.collider == null) return;
                 GameObject go = hit.collider.gameObject;
                 if (go == null) return;
-
-                // Register this impact so ItemDrops spawning nearby over the next few
-                // seconds (stone/wood/resin/etc.) get swallowed before they hit the ground.
-                // MineRock5 sub-areas can scatter drops across a 20 m+ ore vein, so we also
-                // register the full bounds of the hit object's root.
-                if (MegaShotPlugin.ArmageddonSuppressDrops.Value)
-                {
-                    float aoe = Mathf.Max(3f, (float)MegaShotPlugin.ArmageddonAoeRadius.Value);
-                    ArmageddonSuppression.RegisterImpact(hitPoint, aoe + 5f);
-
-                    try
-                    {
-                        var root = go.transform.root != null ? go.transform.root.gameObject : go;
-                        var rootCol = root.GetComponentInChildren<Collider>();
-                        if (rootCol != null)
-                        {
-                            ArmageddonSuppression.RegisterImpact(
-                                rootCol.bounds.center,
-                                rootCol.bounds.extents.magnitude + 3f);
-                        }
-                    }
-                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-                }
 
                 // Build an Armageddon-tagged HitData. Marker (chop/pickaxe = 999998 + backstabBonus = -7777)
                 // routes through the existing destroy/AOE pipeline and spares trees.
@@ -3353,21 +3336,20 @@ namespace MegaShot
     // =========================================================================
     public static class ArmageddonSuppression
     {
-        private struct Impact
-        {
-            public float Time;
-            public Vector3 Point;
-            public float Radius;
-        }
+        // Time-based gate replaces the old proximity-based impact ring buffer.
+        // Proximity was too narrow: big Mistlands / Plains rocks and MineRock5
+        // ore veins scatter drops well past any AOE+bounds radius we can register
+        // when destruction cascades. Gating on "beam fired recently" catches
+        // every junk drop regardless of where in the vein it spawned.
+        private const float ActiveWindowSec = 5f;
+        private static float lastBeamActiveTime = -999f;
 
-        // Short window so we catch drops that spawn a frame or two after Damage().
-        private const float WindowSec = 3f;
-        private const int MaxImpacts = 64; // ring-buffer cap
-
-        private static readonly Queue<Impact> impacts = new Queue<Impact>();
-
-        // Resource junk names to swallow. Keep tight — we want ore, armour, coins,
-        // and creature loot to still drop normally.
+        // Resource junk names to swallow. Matched against
+        // `ItemDrop.m_itemData.m_shared.m_name` (localisation key).
+        // Every rock/boulder/MineRock5 vein in every biome (Meadows → Ashlands,
+        // including Mistlands rocks + Plains boulders + Mountain rocks +
+        // Grausten/Fortress) drops vanilla `Stone.prefab` which uses $item_stone,
+        // so the token match covers all stone sources by design.
         private static readonly HashSet<string> junkItemNames = new HashSet<string>
         {
             "$item_stone",
@@ -3385,48 +3367,53 @@ namespace MegaShot
             "$item_feathers"
         };
 
-        public static void RegisterImpact(Vector3 point, float radius)
+        // Fallback: prefab/GameObject name match in case m_shared.m_name isn't
+        // populated yet at Awake time for some edge cases.
+        private static readonly HashSet<string> junkPrefabNames = new HashSet<string>
         {
-            try
-            {
-                Prune();
-                impacts.Enqueue(new Impact { Time = UnityEngine.Time.time, Point = point, Radius = radius });
-                while (impacts.Count > MaxImpacts) impacts.Dequeue();
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            "Stone",
+            "Wood",
+            "FineWood",
+            "RoundLog",
+            "ElderBark",
+            "YggdrasilWood",
+            "AncientBark",
+            "Resin",
+            "Flint",
+            "Branch",
+            "Stick",
+            "Feathers"
+        };
+
+        public static void MarkBeamActive()
+        {
+            lastBeamActiveTime = UnityEngine.Time.time;
         }
 
-        public static bool IsNearRecentImpact(Vector3 pos)
+        public static bool IsBeamRecentlyActive()
         {
-            Prune();
-            foreach (var imp in impacts)
-            {
-                float dx = imp.Point.x - pos.x;
-                float dz = imp.Point.z - pos.z;
-                float dy = imp.Point.y - pos.y;
-                float sq = dx * dx + dy * dy + dz * dz;
-                float r = imp.Radius;
-                if (sq <= r * r) return true;
-            }
-            return false;
+            return UnityEngine.Time.time - lastBeamActiveTime <= ActiveWindowSec;
         }
 
         public static bool IsJunkItem(ItemDrop drop)
         {
             try
             {
-                var name = drop?.m_itemData?.m_shared?.m_name;
-                if (string.IsNullOrEmpty(name)) return false;
-                return junkItemNames.Contains(name);
+                if (drop == null) return false;
+                var name = drop.m_itemData?.m_shared?.m_name;
+                if (!string.IsNullOrEmpty(name) && junkItemNames.Contains(name)) return true;
+
+                // Fallback: match against prefab/GameObject name (strip "(Clone)" suffix).
+                var goName = drop.gameObject != null ? drop.gameObject.name : null;
+                if (!string.IsNullOrEmpty(goName))
+                {
+                    int paren = goName.IndexOf('(');
+                    if (paren > 0) goName = goName.Substring(0, paren).TrimEnd();
+                    if (junkPrefabNames.Contains(goName)) return true;
+                }
+                return false;
             }
             catch { return false; }
-        }
-
-        private static void Prune()
-        {
-            float now = UnityEngine.Time.time;
-            while (impacts.Count > 0 && now - impacts.Peek().Time > WindowSec)
-                impacts.Dequeue();
         }
 
         public static void TryDestroyDrop(ItemDrop drop)
@@ -3462,8 +3449,8 @@ namespace MegaShot
                 if (!MegaShotPlugin.ArmageddonSuppressDrops.Value) return;
                 if (__instance == null || __instance.gameObject == null) return;
 
+                if (!ArmageddonSuppression.IsBeamRecentlyActive()) return;
                 if (!ArmageddonSuppression.IsJunkItem(__instance)) return;
-                if (!ArmageddonSuppression.IsNearRecentImpact(__instance.transform.position)) return;
 
                 ArmageddonSuppression.TryDestroyDrop(__instance);
             }
