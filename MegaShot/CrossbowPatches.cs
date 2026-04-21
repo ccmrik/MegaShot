@@ -496,6 +496,24 @@ namespace MegaShot
         private static float lastSoundTime = 0f;
         private const float SOUND_THROTTLE_RATE = 12f;  // Max PlayOneShot events/sec for high fire rates
 
+        // Armageddon laser hum: looped procedural clip + dedicated AudioSource on the player
+        private static AudioSource laserAudioSource;
+        private static GameObject laserSourceOwner;
+        private static AudioClip laserClip;
+
+        // Armageddon beam: continuous LineRenderer from weapon origin to crosshair impact,
+        // ticking damage at a fixed 30 Hz. Replaces bolt spawning entirely
+        // while in Armageddon Mode — no projectiles, just the beam.
+        private static LineRenderer beamLine;
+        private static GameObject beamObj;
+        private static Material beamMaterial;
+        private static float lastBeamTickTime = 0f;
+        private static float beamPulsePhase = 0f;
+        private static float lastBeamHitTime = -999f;
+        // Beam ticks damage at a fixed constant rate now — FireRate is no longer
+        // the throttle. Frame-rate independent at a visually smooth cadence.
+        private const float BEAM_TICK_RATE = 30f;
+
         // HUD throttle
         private static float lastHudUpdate = 0f;
 
@@ -594,6 +612,8 @@ namespace MegaShot
                 // Reset audio cache when leaving crossbow
                 fireClipSearched = false;
                 cachedFireClip = null;
+                StopArmageddonLaser();
+                StopArmageddonBeam();
                 return;
             }
 
@@ -616,6 +636,8 @@ namespace MegaShot
             {
                 if (zooming) ResetZoom();
                 CrossbowHUD.showScope = false;
+                StopArmageddonLaser();
+                StopArmageddonBeam();
                 try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 return;
             }
@@ -639,50 +661,78 @@ namespace MegaShot
             }
 
             // === FIRE ===
+            // Armageddon mode (Shift held + enabled): continuous BEAM from the weapon to crosshair.
+            //   No bolts spawn; damage ticks at a fixed 30 Hz along the ray.
             // Destroy mode (Alt held): semi-auto, one bolt per click
             // Normal mode: full-auto while held at configured fire rate
-            bool destroyMode = MegaShotPlugin.DestroyObjects.Value &&
-                Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value);
-            bool fireInput = destroyMode ? Input.GetMouseButtonDown(0) : Input.GetMouseButton(0);
+            bool armageddon = MegaShotPlugin.IsArmageddonActive();
 
-            if (fireInput)
+            if (armageddon)
             {
-                if (state.magazineAmmo <= 0)
-                {
-                    state.isReloading = true;
-                    state.reloadStartTime = Time.time;
-                    __instance.Message(MessageHud.MessageType.Center, "<color=yellow>RELOADING</color>");
-                }
-                else if (destroyMode)
-                {
-                    // Semi-auto: one shot per click, no rate limiting
-                    state.magazineAmmo--;
-                    FireBolt(__instance, weapon);
-                }
-                else
-                {
-                    float interval = 1f / MegaShotPlugin.GetEffectiveFireRate();
-                    if (Time.time - lastFireTime >= interval)
-                    {
-                        // Additive timing to prevent drift, cap to prevent burst after pause
-                        lastFireTime = Mathf.Max(lastFireTime + interval, Time.time - interval);
-                        state.magazineAmmo--;
-                        FireBolt(__instance, weapon);
-                    }
-                }
+                // Beam handles its own firing input + damage ticks + visual.
+                UpdateArmageddonBeam(__instance, weapon, Input.GetMouseButton(0));
             }
             else
             {
-                // Reset animator speed when not firing
-                try
+                StopArmageddonBeam();
+
+                bool destroyMode = MegaShotPlugin.DestroyObjects.Value &&
+                    Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value);
+                bool fireInput = destroyMode ? Input.GetMouseButtonDown(0) : Input.GetMouseButton(0);
+
+                if (fireInput)
                 {
-                    if (cachedAnimator == null)
-                        cachedAnimator = __instance.GetComponentInChildren<Animator>();
-                    if (cachedAnimator != null && cachedAnimator.speed > 1f)
-                        cachedAnimator.speed = 1f;
+                    if (state.magazineAmmo <= 0)
+                    {
+                        state.isReloading = true;
+                        state.reloadStartTime = Time.time;
+                        __instance.Message(MessageHud.MessageType.Center, "<color=yellow>RELOADING</color>");
+                    }
+                    else if (destroyMode)
+                    {
+                        // Semi-auto: one shot per click, no rate limiting
+                        state.magazineAmmo--;
+                        FireBolt(__instance, weapon);
+                    }
+                    else
+                    {
+                        float interval = 1f / MegaShotPlugin.GetEffectiveFireRate();
+                        if (Time.time - lastFireTime >= interval)
+                        {
+                            // Additive timing to prevent drift, cap to prevent burst after pause
+                            lastFireTime = Mathf.Max(lastFireTime + interval, Time.time - interval);
+                            state.magazineAmmo--;
+                            FireBolt(__instance, weapon);
+                        }
+                    }
                 }
-                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                else
+                {
+                    // Reset animator speed when not firing
+                    try
+                    {
+                        if (cachedAnimator == null)
+                            cachedAnimator = __instance.GetComponentInChildren<Animator>();
+                        if (cachedAnimator != null && cachedAnimator.speed > 1f)
+                            cachedAnimator.speed = 1f;
+                    }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                }
             }
+
+            // Armageddon laser hum: continuous loop while LMB held (independent of fire-rate gate)
+            try
+            {
+                bool laserShouldPlay = armageddon
+                    && MegaShotPlugin.ArmageddonLaserSound.Value
+                    && Input.GetMouseButton(0)
+                    && state.magazineAmmo > 0; // unlimited in armageddon, but defensive
+                if (laserShouldPlay)
+                    StartArmageddonLaser(__instance);
+                else
+                    StopArmageddonLaser();
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
@@ -894,9 +944,10 @@ namespace MegaShot
             float totalDamage = MegaShotItem.GetTotalDamage(weapon.m_quality);
             float overallMult = MegaShotPlugin.DamageMultiplier.Value;
 
-            // ALT-fire (destroy mode) quadruples damage
-            bool destroyMode = MegaShotPlugin.DestroyObjects.Value &&
-                Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value);
+            // ALT-fire (destroy mode) or Armageddon (Shift) quadruples damage
+            bool armageddon = MegaShotPlugin.IsArmageddonActive();
+            bool destroyMode = armageddon || (MegaShotPlugin.DestroyObjects.Value &&
+                Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value));
             if (destroyMode)
                 overallMult *= 4f;
 
@@ -939,11 +990,16 @@ namespace MegaShot
             if (weapon.m_shared != null)
                 hitData.m_skill = weapon.m_shared.m_skillType;
 
-            // Tag bolt for object destruction if ALT-fire mode
+            // Tag bolt for object destruction if ALT-fire or Armageddon mode.
+            // Armageddon uses 999998 marker (vs 999999 normal) so downstream code
+            // can spare trees/logs while still destroying everything else.
             if (destroyMode)
             {
-                hitData.m_damage.m_chop = 999999f;
-                hitData.m_damage.m_pickaxe = 999999f;
+                float marker = armageddon ? 999998f : 999999f;
+                hitData.m_damage.m_chop = marker;
+                hitData.m_damage.m_pickaxe = marker;
+                if (armageddon)
+                    hitData.m_backstabBonus = -7777f; // sentinel: armageddon — preserved through TryApplyDestroyDamage
             }
 
             // Stagger / knockback
@@ -972,8 +1028,9 @@ namespace MegaShot
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
-                // Spawn HouseFire at impact point on ANY hit (if enabled)
-                if (MegaShotPlugin.HouseFireEnabled.Value)
+                // Spawn HouseFire at impact point on ANY hit (if enabled).
+                // Armageddon skips HouseFire — too easy to torch the whole base.
+                if (!armageddon && MegaShotPlugin.HouseFireEnabled.Value)
                 {
                     try
                     {
@@ -1187,8 +1244,17 @@ namespace MegaShot
             //     >15 rps: throttled overlapping PlayOneShot (~12/sec on one AudioSource)
             //     Overlapping one-shots naturally blend into continuous "brrrrt" fire sound.
             //     12 PlayOneShot/sec with a ~0.3-0.5s clip = ~4-6 overlapping voices = smooth.
+            //
+            // Armageddon Mode (with LaserSound enabled) skips per-shot audio entirely —
+            // the looping laser hum on the player AudioSource provides the continuous beam SFX.
+            bool skipPerShotSound = armageddon && MegaShotPlugin.ArmageddonLaserSound.Value;
             try
             {
+                if (skipPerShotSound)
+                {
+                    // Armageddon laser hum handles audio in the Update loop — skip per-shot SFX.
+                }
+                else {
                 float fireRate = MegaShotPlugin.GetEffectiveFireRate();
 
                 // Ensure fire clip is always cached
@@ -1243,6 +1309,7 @@ namespace MegaShot
                         soundPlayed = TryInstantiateEffectPrefabs(attack, spawnPos, aimDir);
                     }
                 }
+                } // end else (per-shot sound block)
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
@@ -1251,6 +1318,335 @@ namespace MegaShot
         }
 
         // ---- Sound Helpers ----
+
+        // ---- Armageddon laser hum ----
+        // Procedural sci-fi beam: layered sines (sub/carrier/harmonic) with vibrato,
+        // a touch of high-frequency buzz and noise. Generated once, cached, looped
+        // through a dedicated 2D AudioSource on the player so volume stays even.
+        private static AudioClip GenerateLaserClip()
+        {
+            const int sampleRate = 44100;
+            const int len = sampleRate; // 1 second loop
+            var data = new float[len];
+            var rng = new System.Random(0xA52F);
+            for (int i = 0; i < len; i++)
+            {
+                float t = i / (float)sampleRate;
+                float carrier   = Mathf.Sin(2f * Mathf.PI * 220f * t);
+                float harmonic  = Mathf.Sin(2f * Mathf.PI * 440f * t) * 0.4f;
+                float sub       = Mathf.Sin(2f * Mathf.PI * 110f * t) * 0.3f;
+                float buzz      = Mathf.Sin(2f * Mathf.PI * 1100f * t) * 0.08f;
+                float vibrato   = 0.85f + Mathf.Sin(2f * Mathf.PI * 8f * t) * 0.15f;
+                float noise     = ((float)rng.NextDouble() - 0.5f) * 0.05f;
+                data[i] = (carrier + harmonic + sub + buzz + noise) * vibrato * 0.18f;
+            }
+            var clip = AudioClip.Create("MegaShotArmageddonLaser", len, 1, sampleRate, false);
+            clip.SetData(data, 0);
+            return clip;
+        }
+
+        private static void EnsureLaserAudioSource(Player player)
+        {
+            if (player == null) return;
+            if (laserClip == null) laserClip = GenerateLaserClip();
+            if (laserAudioSource != null && laserSourceOwner == player.gameObject) return;
+            laserAudioSource = player.gameObject.AddComponent<AudioSource>();
+            laserSourceOwner = player.gameObject;
+            laserAudioSource.clip = laserClip;
+            laserAudioSource.loop = true;
+            laserAudioSource.spatialBlend = 0f; // 2D — first-person beam, no distance falloff
+            laserAudioSource.playOnAwake = false;
+            laserAudioSource.priority = 64;
+        }
+
+        private static void StartArmageddonLaser(Player player)
+        {
+            try
+            {
+                EnsureLaserAudioSource(player);
+                if (laserAudioSource == null) return;
+                laserAudioSource.volume = Mathf.Clamp01(MegaShotPlugin.ArmageddonLaserVolume.Value / 100f);
+                if (!laserAudioSource.isPlaying) laserAudioSource.Play();
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        private static void StopArmageddonLaser()
+        {
+            try
+            {
+                if (laserAudioSource != null && laserAudioSource.isPlaying)
+                    laserAudioSource.Stop();
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        // ---- Armageddon beam ----
+        // Thin red beam with procedural flicker: 7 vertices along the ray, each middle
+        // vertex jittered on the camera's perpendicular axes per-frame for a natural
+        // "alive" wobble. Width + alpha + colour all flicker so the beam reads as energy
+        // rather than a clean line.
+        private const int BeamSegments = 7;
+        private static readonly Vector3[] beamPositions = new Vector3[BeamSegments];
+
+        private static void EnsureBeamRenderer()
+        {
+            if (beamLine != null && beamObj != null) return;
+
+            beamObj = new GameObject("MegaShotArmageddonBeam");
+            UnityEngine.Object.DontDestroyOnLoad(beamObj);
+            beamLine = beamObj.AddComponent<LineRenderer>();
+
+            // Sprites/Default ships with every Unity build and supports vertex colour + alpha.
+            if (beamMaterial == null)
+            {
+                var shader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color");
+                beamMaterial = new Material(shader);
+            }
+            beamLine.material = beamMaterial;
+            beamLine.positionCount = BeamSegments;
+            beamLine.useWorldSpace = true;
+            beamLine.numCapVertices = 2;
+            beamLine.numCornerVertices = 0;
+            beamLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            beamLine.receiveShadows = false;
+            beamLine.enabled = false;
+        }
+
+        private static void StopArmageddonBeam()
+        {
+            try
+            {
+                if (beamLine != null) beamLine.enabled = false;
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        /// <summary>
+        /// Per-frame Armageddon beam update.
+        /// While `firing` is true, draws a line from the weapon origin to the crosshair impact
+        /// and ticks destroy-tagged damage at a fixed 30 Hz on whatever's hit.
+        /// All damage flows through the existing destroy/AOE pipeline via the armageddon marker,
+        /// so trees are still spared and AOE radius still applies.
+        /// </summary>
+        private static void UpdateArmageddonBeam(Player player, ItemDrop.ItemData weapon, bool firing)
+        {
+            try
+            {
+                if (!firing)
+                {
+                    StopArmageddonBeam();
+                    return;
+                }
+
+                Camera cam;
+                Ray aimRay;
+                if (!GetAimRay(out cam, out aimRay))
+                {
+                    StopArmageddonBeam();
+                    return;
+                }
+
+                EnsureBeamRenderer();
+                if (beamLine == null) return;
+
+                // Find impact point (or the far end of the ray when nothing is hit).
+                float maxRange = Mathf.Max(50f, (float)MegaShotPlugin.ArmageddonRange.Value);
+                RaycastHit hit;
+                Vector3 endPoint;
+                bool isDamageable;
+                bool hasHit = BeamRaycast(aimRay, player, maxRange, out hit, out endPoint, out isDamageable);
+
+                // Track when the beam last struck a damageable target; drives the flash.
+                if (hasHit && isDamageable) lastBeamHitTime = Time.time;
+                // Flash decays over ~150ms after last hit tick.
+                float flash = Mathf.Clamp01(1f - (Time.time - lastBeamHitTime) / 0.15f);
+
+                Vector3 origin = player.transform.position + Vector3.up * 1.5f;
+
+                // Fast pulse for width/alpha + faster flicker for brightness variation.
+                beamPulsePhase = (beamPulsePhase + Time.deltaTime * 22f) % (Mathf.PI * 2f);
+                float pulse     = 0.5f + 0.5f * Mathf.Sin(beamPulsePhase);
+                float flicker   = 0.7f + 0.3f * UnityEngine.Random.value; // per-frame jitter
+                // Extra strobe while flashing — crank the jitter/brightness.
+                float hitStrobe = flash > 0f ? (0.6f + 0.4f * UnityEngine.Random.value) : 0f;
+
+                // Scope compensates for FOV: zoom divides FOV by zoomLevel, so the beam
+                // would otherwise appear zoomLevel× thicker through the scope. Shrink the
+                // world width by the same factor so the apparent width stays constant.
+                float widthScale = (zooming && zoomLevel > 0.01f) ? (1f / zoomLevel) : 1f;
+
+                // Base width breathes subtly. endWidth flares dramatically on hit
+                // to create a visible "impact bloom" at the target.
+                float baseStart = 0.035f + pulse * 0.015f;
+                float baseEnd   = 0.015f + pulse * 0.008f;
+                float endFlare  = 1f + flash * (4f + hitStrobe * 2f); // up to ~6× fatter when striking
+                beamLine.startWidth = baseStart * widthScale * (1f + flash * 0.6f);
+                beamLine.endWidth   = baseEnd   * widthScale * endFlare;
+
+                // Red normally, blending toward a hot white-orange core while flashing.
+                Color coreRed    = new Color(1f, 0.05f * flicker, 0.05f * flicker, 1f);
+                Color tailRed    = new Color(0.9f * flicker, 0.00f, 0.00f, 0.75f);
+                Color coreOrange = new Color(1f, 0.85f, 0.55f, 1f); // hot white-orange at the muzzle
+                Color tailOrange = new Color(1f, 0.55f, 0.10f, 1f); // saturated orange flare at impact
+                beamLine.startColor = Color.Lerp(coreRed, coreOrange, flash * 0.6f);
+                beamLine.endColor   = Color.Lerp(tailRed, tailOrange, flash);
+
+                // Build 7-vertex polyline with tiny perpendicular noise on interior points.
+                // Jitter magnitude is tied to distance so it stays readable at range.
+                Vector3 dir = endPoint - origin;
+                float len = dir.magnitude;
+                Vector3 fwd = (len > 0.0001f) ? (dir / len) : Vector3.forward;
+                // Perpendicular axes in world space — cross with world-up then with fwd.
+                Vector3 right = Vector3.Cross(fwd, Vector3.up);
+                if (right.sqrMagnitude < 0.0001f) right = Vector3.Cross(fwd, Vector3.right);
+                right.Normalize();
+                Vector3 up = Vector3.Cross(right, fwd).normalized;
+                float jitterScale = Mathf.Lerp(0.005f, 0.04f, Mathf.Clamp01(len / 120f));
+                // Hit flash wobbles the beam harder for a "live wire" feel.
+                jitterScale *= 1f + flash * 2.5f;
+
+                beamPositions[0] = origin;
+                beamPositions[BeamSegments - 1] = endPoint;
+                for (int i = 1; i < BeamSegments - 1; i++)
+                {
+                    float t = i / (float)(BeamSegments - 1);
+                    Vector3 straight = Vector3.Lerp(origin, endPoint, t);
+                    // Interior jitter: small perpendicular offset, multi-frequency.
+                    float jr = (Mathf.PerlinNoise(Time.time * 12f + i * 3.7f, 0.31f) - 0.5f) * 2f;
+                    float ju = (Mathf.PerlinNoise(0.73f, Time.time * 12f + i * 3.7f) - 0.5f) * 2f;
+                    straight += right * (jr * jitterScale) + up * (ju * jitterScale);
+                    beamPositions[i] = straight;
+                }
+                beamLine.SetPositions(beamPositions);
+                beamLine.enabled = true;
+
+                // Damage ticks at a fixed constant rate — no longer gated by FireRate config.
+                float interval = 1f / BEAM_TICK_RATE;
+                if (Time.time - lastBeamTickTime < interval) return;
+                lastBeamTickTime = Mathf.Max(lastBeamTickTime + interval, Time.time - interval);
+
+                if (!hasHit) return;
+
+                ApplyBeamHit(player, weapon, hit, endPoint);
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        /// <summary>
+        /// Armageddon-specific raycast with configurable range. Mirrors RaycastCrosshair
+        /// but honours `ArmageddonRange` instead of the 1000 m default used by aim helpers.
+        /// </summary>
+        private static bool BeamRaycast(Ray aimRay, Player player, float maxRange, out RaycastHit hit, out Vector3 endPoint, out bool isDamageable)
+        {
+            int layerMask = ~(LayerMask.GetMask("UI", "character_trigger", "viewblock", "WaterVolume", "Water", "smoke"));
+            RaycastHit[] hits = Physics.RaycastAll(aimRay.origin, aimRay.direction, maxRange, layerMask);
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            Transform playerRoot = player.transform.root;
+            for (int i = 0; i < hits.Length; i++)
+            {
+                Transform hitRoot = hits[i].collider.transform.root;
+                if (hitRoot == playerRoot) continue;
+                if (hits[i].collider.isTrigger) continue;
+                hit = hits[i];
+                endPoint = hit.point;
+                var go = hit.collider.gameObject;
+                isDamageable =
+                    go.GetComponentInParent<Character>() != null ||
+                    go.GetComponentInParent<Destructible>() != null ||
+                    go.GetComponentInParent<MineRock5>() != null ||
+                    go.GetComponentInParent<MineRock>() != null ||
+                    go.GetComponentInParent<WearNTear>() != null;
+                return true;
+            }
+            hit = default(RaycastHit);
+            endPoint = aimRay.origin + aimRay.direction * maxRange;
+            isDamageable = false;
+            return false;
+        }
+
+        private static void ApplyBeamHit(Player player, ItemDrop.ItemData weapon, RaycastHit hit, Vector3 hitPoint)
+        {
+            try
+            {
+                if (hit.collider == null) return;
+                GameObject go = hit.collider.gameObject;
+                if (go == null) return;
+
+                // Register this impact so ItemDrops spawning nearby over the next few
+                // seconds (stone/wood/resin/etc.) get swallowed before they hit the ground.
+                // MineRock5 sub-areas can scatter drops across a 20 m+ ore vein, so we also
+                // register the full bounds of the hit object's root.
+                if (MegaShotPlugin.ArmageddonSuppressDrops.Value)
+                {
+                    float aoe = Mathf.Max(3f, (float)MegaShotPlugin.ArmageddonAoeRadius.Value);
+                    ArmageddonSuppression.RegisterImpact(hitPoint, aoe + 5f);
+
+                    try
+                    {
+                        var root = go.transform.root != null ? go.transform.root.gameObject : go;
+                        var rootCol = root.GetComponentInChildren<Collider>();
+                        if (rootCol != null)
+                        {
+                            ArmageddonSuppression.RegisterImpact(
+                                rootCol.bounds.center,
+                                rootCol.bounds.extents.magnitude + 3f);
+                        }
+                    }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                }
+
+                // Build an Armageddon-tagged HitData. Marker (chop/pickaxe = 999998 + backstabBonus = -7777)
+                // routes through the existing destroy/AOE pipeline and spares trees.
+                HitData hitData = new HitData();
+                hitData.m_damage.m_damage   = 999999f;
+                hitData.m_damage.m_blunt    = 999999f;
+                hitData.m_damage.m_slash    = 999999f;
+                hitData.m_damage.m_pierce   = 999999f;
+                hitData.m_damage.m_chop     = 999998f;
+                hitData.m_damage.m_pickaxe  = 999998f;
+                hitData.m_damage.m_fire     = 999999f;
+                hitData.m_damage.m_frost    = 999999f;
+                hitData.m_damage.m_lightning= 999999f;
+                hitData.m_damage.m_poison   = 999999f;
+                hitData.m_damage.m_spirit   = 999999f;
+                hitData.m_toolTier = 9999;
+                hitData.m_backstabBonus = -7777f; // armageddon sentinel
+                hitData.m_skill = Skills.SkillType.Crossbows;
+                hitData.m_point = hitPoint;
+                hitData.m_dir = (hitPoint - player.transform.position).normalized;
+                try { hitData.SetAttacker(player); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+
+                // Direct hit dispatch — fire all known target types so we don't miss anything.
+                // Each Damage() invocation triggers its own destroy postfix → TryAOEDestroy
+                // (which spares trees in armageddon and applies the configured AOE radius).
+                bool hitSomething = false;
+
+                var character = go.GetComponentInParent<Character>();
+                if (character != null) { character.Damage(hitData); hitSomething = true; }
+
+                var dest = go.GetComponentInParent<Destructible>();
+                if (dest != null) { dest.Damage(hitData); hitSomething = true; }
+
+                var rock5 = go.GetComponentInParent<MineRock5>();
+                if (rock5 != null) { rock5.Damage(hitData); hitSomething = true; }
+
+                var rock = go.GetComponentInParent<MineRock>();
+                if (rock != null) { rock.Damage(hitData); hitSomething = true; }
+
+                var wnt = go.GetComponentInParent<WearNTear>();
+                if (wnt != null) { wnt.Damage(hitData); hitSomething = true; }
+
+                // Trees/logs are intentionally NOT damaged (Armageddon spares them).
+                // If we hit purely terrain or no recognised target, still trigger AOE so
+                // surrounding rocks/saplings get vaporised at the impact point.
+                if (!hitSomething)
+                {
+                    DestroyObjectsHelper.TryAOEDestroy(hitData, hitPoint);
+                }
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
 
         private static void EnsureCachedAudioSource(Player player)
         {
@@ -1762,7 +2158,7 @@ namespace MegaShot
                 if (hit.m_skill != Skills.SkillType.Crossbows) return;
                 if (!DestroyObjectsHelper.IsDestroyTagged(hit)) return;
 
-                float radius = MegaShotPlugin.AoeRadius.Value;
+                float radius = DestroyObjectsHelper.GetAoeRadiusForHit(hit);
                 if (radius <= 0f) return;
 
                 Vector3 impactPoint = hit.m_point;
@@ -2152,20 +2548,23 @@ namespace MegaShot
         public static bool TryApplyDestroyDamage(HitData hit)
         {
             if (!MegaShotPlugin.ModEnabled.Value) return false;
-            if (!MegaShotPlugin.DestroyObjects.Value) return false;
             if (hit == null) return false;
+            if (!MegaShotPlugin.DestroyObjects.Value && !IsArmageddonHit(hit)) return false;
 
             // Detect destroy-tagged bolts by their chop/pickaxe values
             // (these are reliably preserved in Projectile.m_damage)
             if (hit.m_damage.m_chop < 999000f && hit.m_damage.m_pickaxe < 999000f)
                 return false;
 
+            // Preserve the armageddon marker (999998) so the no-trees rule survives
+            // through to ForceDestroyIfNeeded / TryAOEDestroy.
+            float marker = IsArmageddonHit(hit) ? 999998f : 999999f;
             hit.m_damage.m_damage = 999999f;
             hit.m_damage.m_blunt = 999999f;
             hit.m_damage.m_slash = 999999f;
             hit.m_damage.m_pierce = 999999f;
-            hit.m_damage.m_chop = 999999f;
-            hit.m_damage.m_pickaxe = 999999f;
+            hit.m_damage.m_chop = marker;
+            hit.m_damage.m_pickaxe = marker;
             hit.m_damage.m_fire = 999999f;
             hit.m_damage.m_frost = 999999f;
             hit.m_damage.m_lightning = 999999f;
@@ -2183,6 +2582,24 @@ namespace MegaShot
             if (hit == null) return false;
             return hit.m_damage.m_chop >= 999000f || hit.m_damage.m_pickaxe >= 999000f;
         }
+
+        /// <summary>
+        /// Armageddon Mode bolts carry a sentinel marker on m_backstabBonus
+        /// (set in FireBolt). Preserved across destroy paths so trees/logs
+        /// can be spared from destruction.
+        /// </summary>
+        public static bool IsArmageddonHit(HitData hit)
+        {
+            if (hit == null) return false;
+            return hit.m_backstabBonus < -7776.5f && hit.m_backstabBonus > -7777.5f;
+        }
+
+        /// <summary>
+        /// Returns the configured AOE radius for the given hit — Armageddon
+        /// hits use the larger ArmageddonAoeRadius, otherwise standard AoeRadius.
+        /// </summary>
+        public static float GetAoeRadiusForHit(HitData hit) =>
+            IsArmageddonHit(hit) ? (float)MegaShotPlugin.ArmageddonAoeRadius.Value : MegaShotPlugin.AoeRadius.Value;
 
         /// <summary>
         /// Force-destroys an object that survived our 999999 damage due to immunity/resistance.
@@ -2279,7 +2696,10 @@ namespace MegaShot
             lastProcessedRockId = rockId;
             lastProcessedRockTime = Time.time;
 
-            float radius = MegaShotPlugin.AoeRadius.Value;
+            float radius = IsArmageddonHit(hit)
+                ? 9999f // Armageddon: vaporise the entire rock, no sub-area filter
+                : MegaShotPlugin.AoeRadius.Value;
+            // AoeRadius.Value is float; ArmageddonAoeRadius.Value is int — both handled above.
             if (radius <= 0f) radius = 1f;
 
             if (impactPoint == Vector3.zero) impactPoint = hit.m_point;
@@ -2341,11 +2761,12 @@ namespace MegaShot
             if (isApplyingAOE) return;
             if (isDestroyingAreas) return; // don't AOE blast while fracturing sub-areas
             if (!MegaShotPlugin.ModEnabled.Value) return;
-            if (!MegaShotPlugin.DestroyObjects.Value) return;
             if (hit == null) return;
+            bool isArmageddon = IsArmageddonHit(hit);
+            if (!MegaShotPlugin.DestroyObjects.Value && !isArmageddon) return;
             if (hit.m_damage.m_chop < 999000f && hit.m_damage.m_pickaxe < 999000f) return;
 
-            float radius = MegaShotPlugin.AoeRadius.Value;
+            float radius = GetAoeRadiusForHit(hit);
             if (radius <= 0f)
                 return;
 
@@ -2409,13 +2830,17 @@ namespace MegaShot
                     }
                     catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
-                    // --- Trees ---
+                    // --- Trees --- (Armageddon spares trees and logs)
                     try
                     {
                         var tree = go.GetComponentInParent<TreeBase>();
                         if (tree != null)
                         {
-                            if (processedRoots.Add(tree.GetInstanceID()))
+                            if (isArmageddon)
+                            {
+                                processedRoots.Add(tree.GetInstanceID());
+                            }
+                            else if (processedRoots.Add(tree.GetInstanceID()))
                             {
                                 tree.Damage(aoeHit);
                                 ForceDestroyIfNeeded(tree, aoeHit, "TreeBase(AOE)");
@@ -2429,7 +2854,11 @@ namespace MegaShot
                         var log = go.GetComponentInParent<TreeLog>();
                         if (log != null)
                         {
-                            if (processedRoots.Add(log.GetInstanceID()))
+                            if (isArmageddon)
+                            {
+                                processedRoots.Add(log.GetInstanceID());
+                            }
+                            else if (processedRoots.Add(log.GetInstanceID()))
                             {
                                 log.Damage(aoeHit);
                                 ForceDestroyIfNeeded(log, aoeHit, "TreeLog(AOE)");
@@ -2586,21 +3015,25 @@ namespace MegaShot
         }
     }
 
-    // Trees (standing)
+    // Trees (standing) — Armageddon Mode skips Damage entirely so trees survive
     [HarmonyPatch(typeof(TreeBase), "Damage")]
     public static class PatchDestroyTree
     {
         private static Vector3 savedImpactPoint;
 
-        public static void Prefix(HitData hit)
+        public static bool Prefix(HitData hit)
         {
             try
             {
+                if (DestroyObjectsHelper.IsArmageddonHit(hit))
+                    return false; // Armageddon spares trees
+
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                     savedImpactPoint = hit.m_point;
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return true;
         }
         public static void Postfix(TreeBase __instance, HitData hit)
         {
@@ -2611,21 +3044,25 @@ namespace MegaShot
         }
     }
 
-    // Logs (fallen trees)
+    // Logs (fallen trees) — Armageddon Mode skips Damage entirely so logs survive
     [HarmonyPatch(typeof(TreeLog), "Damage")]
     public static class PatchDestroyLog
     {
         private static Vector3 savedImpactPoint;
 
-        public static void Prefix(HitData hit)
+        public static bool Prefix(HitData hit)
         {
             try
             {
+                if (DestroyObjectsHelper.IsArmageddonHit(hit))
+                    return false; // Armageddon spares logs
+
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                     savedImpactPoint = hit.m_point;
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return true;
         }
         public static void Postfix(TreeLog __instance, HitData hit)
         {
@@ -2767,6 +3204,132 @@ namespace MegaShot
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             // AOE destroy adjacent objects (trees, other rocks, etc.)
             try { DestroyObjectsHelper.TryAOEDestroy(hit, savedImpactPoint); }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+    }
+
+    // =========================================================================
+    // ARMAGEDDON DROP SUPPRESSION
+    // While firing the beam, any resource-junk ItemDrop (stone, wood, flint,
+    // resin, etc.) that spawns within the AOE radius of a recent impact gets
+    // destroyed before it hits the ground. Keeps the world tidy at 100 ticks/sec.
+    // =========================================================================
+    public static class ArmageddonSuppression
+    {
+        private struct Impact
+        {
+            public float Time;
+            public Vector3 Point;
+            public float Radius;
+        }
+
+        // Short window so we catch drops that spawn a frame or two after Damage().
+        private const float WindowSec = 3f;
+        private const int MaxImpacts = 64; // ring-buffer cap
+
+        private static readonly Queue<Impact> impacts = new Queue<Impact>();
+
+        // Resource junk names to swallow. Keep tight — we want ore, armour, coins,
+        // and creature loot to still drop normally.
+        private static readonly HashSet<string> junkItemNames = new HashSet<string>
+        {
+            "$item_stone",
+            "$item_wood",
+            "$item_finewood",
+            "$item_corewood",
+            "$item_roundlog",
+            "$item_elderbark",
+            "$item_yggdrasilwood",
+            "$item_ancientbark",
+            "$item_resin",
+            "$item_flint",
+            "$item_branch",
+            "$item_stick",
+            "$item_feathers"
+        };
+
+        public static void RegisterImpact(Vector3 point, float radius)
+        {
+            try
+            {
+                Prune();
+                impacts.Enqueue(new Impact { Time = UnityEngine.Time.time, Point = point, Radius = radius });
+                while (impacts.Count > MaxImpacts) impacts.Dequeue();
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        public static bool IsNearRecentImpact(Vector3 pos)
+        {
+            Prune();
+            foreach (var imp in impacts)
+            {
+                float dx = imp.Point.x - pos.x;
+                float dz = imp.Point.z - pos.z;
+                float dy = imp.Point.y - pos.y;
+                float sq = dx * dx + dy * dy + dz * dz;
+                float r = imp.Radius;
+                if (sq <= r * r) return true;
+            }
+            return false;
+        }
+
+        public static bool IsJunkItem(ItemDrop drop)
+        {
+            try
+            {
+                var name = drop?.m_itemData?.m_shared?.m_name;
+                if (string.IsNullOrEmpty(name)) return false;
+                return junkItemNames.Contains(name);
+            }
+            catch { return false; }
+        }
+
+        private static void Prune()
+        {
+            float now = UnityEngine.Time.time;
+            while (impacts.Count > 0 && now - impacts.Peek().Time > WindowSec)
+                impacts.Dequeue();
+        }
+
+        public static void TryDestroyDrop(ItemDrop drop)
+        {
+            try
+            {
+                if (drop == null || drop.gameObject == null) return;
+                var nview = drop.GetComponent<ZNetView>();
+                if (nview == null) nview = drop.GetComponentInParent<ZNetView>();
+                if (nview != null && nview.IsValid())
+                {
+                    if (!nview.IsOwner()) nview.ClaimOwnership();
+                    nview.Destroy();
+                }
+                else
+                {
+                    UnityEngine.Object.Destroy(drop.gameObject);
+                }
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+    }
+
+    [HarmonyPatch(typeof(ItemDrop), "Awake")]
+    public static class PatchArmageddonSuppressDrops
+    {
+        public static void Postfix(ItemDrop __instance)
+        {
+            try
+            {
+                if (!MegaShotPlugin.ModEnabled.Value) return;
+                if (!MegaShotPlugin.ArmageddonEnabled.Value) return;
+                if (!MegaShotPlugin.ArmageddonSuppressDrops.Value) return;
+                if (__instance == null || __instance.gameObject == null) return;
+
+                if (!ArmageddonSuppression.IsJunkItem(__instance)) return;
+                if (!ArmageddonSuppression.IsNearRecentImpact(__instance.transform.position)) return;
+
+                ArmageddonSuppression.TryDestroyDrop(__instance);
+            }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
     }
