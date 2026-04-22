@@ -3346,25 +3346,14 @@ namespace MegaShot
 
         // Resource junk names to swallow. Matched against
         // `ItemDrop.m_itemData.m_shared.m_name` (localisation key).
-        // Every rock/boulder/MineRock5 vein in every biome (Meadows → Ashlands,
-        // including Mistlands rocks + Plains boulders + Mountain rocks +
-        // Grausten/Fortress) drops vanilla `Stone.prefab` which uses $item_stone,
-        // so the token match covers all stone sources by design.
+        // Scope: only plain Stone and plain Wood — the two overwhelming drops
+        // when Armageddon chews through rocks and trees/stumps. Everything else
+        // (finewood, corewood, elderbark, resin, flint, feathers, and all
+        // creature/loot drops like Fenris Hair + Red Jute) drops normally.
         private static readonly HashSet<string> junkItemNames = new HashSet<string>
         {
             "$item_stone",
-            "$item_wood",
-            "$item_finewood",
-            "$item_corewood",
-            "$item_roundlog",
-            "$item_elderbark",
-            "$item_yggdrasilwood",
-            "$item_ancientbark",
-            "$item_resin",
-            "$item_flint",
-            "$item_branch",
-            "$item_stick",
-            "$item_feathers"
+            "$item_wood"
         };
 
         // Fallback: prefab/GameObject name match in case m_shared.m_name isn't
@@ -3372,17 +3361,7 @@ namespace MegaShot
         private static readonly HashSet<string> junkPrefabNames = new HashSet<string>
         {
             "Stone",
-            "Wood",
-            "FineWood",
-            "RoundLog",
-            "ElderBark",
-            "YggdrasilWood",
-            "AncientBark",
-            "Resin",
-            "Flint",
-            "Branch",
-            "Stick",
-            "Feathers"
+            "Wood"
         };
 
         public static void MarkBeamActive()
