@@ -1743,7 +1743,11 @@ namespace MegaShot
                 bool hitSomething = false;
 
                 var character = go.GetComponentInParent<Character>();
-                if (character != null) { character.Damage(hitData); hitSomething = true; }
+                if (character != null && !ArmageddonSuppression.IsFriendlyToBeam(character, player))
+                {
+                    character.Damage(hitData);
+                    hitSomething = true;
+                }
 
                 var dest = go.GetComponentInParent<Destructible>();
                 if (dest != null) { dest.Damage(hitData); hitSomething = true; }
@@ -2301,6 +2305,9 @@ namespace MegaShot
                     var character = col.GetComponentInParent<Character>();
                     if (character == null) continue;
                     if (!alreadyHit.Add(character.GetInstanceID())) continue;
+                    // Spare tames, other players, player-raised undead, and Dvergr —
+                    // same rule Valheim uses for AI aggro (attacker.IsEnemy(target)).
+                    if (ArmageddonSuppression.IsFriendlyToBeam(character, attacker)) continue;
 
                     // Build splash damage from the original hit — use a different skill
                     // to prevent the AOE/DoT postfixes from running again on splash targets
@@ -3383,6 +3390,66 @@ namespace MegaShot
             return UnityEngine.Time.time - lastBeamActiveTime <= 0.3f;
         }
 
+        // FX suppression safety gate: some destructibles (Guck sacks, beehives,
+        // ornaments, etc.) spawn their LOOT through `m_destroyedEffect.Create`
+        // rather than a separate drop path — the effect prefab list contains an
+        // ItemDrop-bearing prefab that Create instantiates. If we blanket-skip
+        // Create we also delete the loot. Walk the EffectList once per instance
+        // and cache whether any prefab has an ItemDrop anywhere in its
+        // hierarchy; if yes, let vanilla run so drops still spawn.
+        private static readonly Dictionary<EffectList, bool> effectListDropCache =
+            new Dictionary<EffectList, bool>();
+
+        /// <summary>
+        /// Returns true if the beam/AOE must NOT damage the given character.
+        /// Covers: tamed creatures, player-raised undead (PlayerSubjects faction),
+        /// other players, and neutral Dvergr. Uses `attacker.IsEnemy(target)`
+        /// as the canonical faction check — same rule Valheim uses for AI aggro.
+        /// </summary>
+        public static bool IsFriendlyToBeam(Character character, Character attacker)
+        {
+            if (character == null) return false;
+            try
+            {
+                if (character.IsPlayer()) return true;
+                if (character.IsTamed()) return true;
+                // Canonical faction check — same rule vanilla AI uses for aggro.
+                if (attacker != null && !BaseAI.IsEnemy(attacker, character)) return true;
+            }
+            catch { /* defensive — on any reflection oddity, default to hostile (don't accidentally protect everything) */ }
+            return false;
+        }
+
+        public static bool EffectListHasItemDrop(EffectList list)
+        {
+            if (list == null) return false;
+            if (effectListDropCache.TryGetValue(list, out bool cached)) return cached;
+
+            bool hasDrop = false;
+            try
+            {
+                var arr = list.m_effectPrefabs;
+                if (arr != null)
+                {
+                    for (int i = 0; i < arr.Length; i++)
+                    {
+                        var data = arr[i];
+                        if (data == null) continue;
+                        var prefab = data.m_prefab;
+                        if (prefab == null) continue;
+                        if (prefab.GetComponentInChildren<ItemDrop>(true) != null)
+                        {
+                            hasDrop = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { hasDrop = true; } // fail safe → let vanilla run so drops aren't lost
+            effectListDropCache[list] = hasDrop;
+            return hasDrop;
+        }
+
         public static bool IsJunkItem(ItemDrop drop)
         {
             try
@@ -3458,7 +3525,7 @@ namespace MegaShot
     [HarmonyPatch(typeof(EffectList), "Create")]
     public static class PatchArmageddonSuppressFx
     {
-        public static bool Prefix(ref GameObject[] __result)
+        public static bool Prefix(EffectList __instance, ref GameObject[] __result)
         {
             try
             {
@@ -3466,6 +3533,11 @@ namespace MegaShot
                 if (!MegaShotPlugin.ArmageddonEnabled.Value) return true;
                 if (!MegaShotPlugin.ArmageddonSuppressFx.Value) return true;
                 if (!ArmageddonSuppression.IsBeamFiringNow()) return true;
+
+                // Safety: if this effect list instantiates any ItemDrop-bearing
+                // prefab (Guck sacks, beehives, etc. spawn loot via the destroy
+                // effect), let vanilla run so loot still drops.
+                if (ArmageddonSuppression.EffectListHasItemDrop(__instance)) return true;
 
                 __result = System.Array.Empty<GameObject>();
                 return false;

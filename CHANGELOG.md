@@ -5,6 +5,12 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.8] - 2026-04-22
+
+### Fixed
+- **Armageddon FX suppression was also eating Guck / honey / ornament loot.** Some destructibles (Guck sacks, beehives, lootable ornaments, etc.) spawn their actual loot via the `m_destroyedEffect` prefab list, not via a separate drop path. The v2.6.6 blanket skip on `EffectList.Create` was deleting those loot spawns along with the cosmetic dust puffs. Now the Prefix inspects each `EffectList` once (cached), and if any prefab in it has an `ItemDrop` component anywhere in its hierarchy, vanilla runs so the loot drops normally. Pure cosmetic effect lists (rock hit sparks, destroy dust, etc.) still get skipped — perf win intact, Stone + Wood still the only bulk drops suppressed.
+- **Armageddon no longer kills friendlies.** Direct beam hits and the splash-AOE loop now skip damage on any target that's: a tamed creature, another player, a player-raised undead (PlayerSubjects faction), or a neutral Dvergr. Canonical faction check via `BaseAI.IsEnemy(attacker, target)` — same rule vanilla AI uses to decide aggro. Fixes friendly skeletons getting vaporised and Dvergr outposts being razed when AOE sweeps past them.
+
 ## [2.6.7] - 2026-04-22
 
 ### Changed
