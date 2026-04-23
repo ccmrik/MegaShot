@@ -5,6 +5,11 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.10] - 2026-04-22
+
+### Fixed
+- **Armageddon no longer destroys Ashlands fortress walls** (or any non-allowlisted WearNTear piece). The AOE path already gated WearNTear through `IsDestroyableWorldPiece`, but the direct beam hit in `ApplyBeamHit` was calling `wnt.Damage()` unconditionally — the Prefix stripped chop/pickaxe but left slash/blunt/fire at 999999 so walls still vaporised. Direct beam hit now uses the same allowlist (`Gate_Door`, `Ashland_Stair`, `Ashlands_Wall_2x2_top`) so only fortress doors / stairs / upper walls are demolish-able; generic fortress walls and player builds are spared. Beam hit-flash bloom also gated on the same check so non-damageable WearNTear no longer flashes orange.
+
 ## [2.6.9] - 2026-04-22
 
 ### Added

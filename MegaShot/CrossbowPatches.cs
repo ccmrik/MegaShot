@@ -1694,12 +1694,17 @@ namespace MegaShot
                 hit = hits[i];
                 endPoint = hit.point;
                 var go = hit.collider.gameObject;
+                // Character / destructible / rock → always damageable by the beam.
+                // WearNTear is only damageable if it's an allowlisted destroyable piece
+                // (fortress doors, stairs, upper-walls). Fortress walls + player builds
+                // aren't — no flash bloom on them, matches the damage gate below.
+                var wntTest = go.GetComponentInParent<WearNTear>();
                 isDamageable =
                     go.GetComponentInParent<Character>() != null ||
                     go.GetComponentInParent<Destructible>() != null ||
                     go.GetComponentInParent<MineRock5>() != null ||
                     go.GetComponentInParent<MineRock>() != null ||
-                    go.GetComponentInParent<WearNTear>() != null;
+                    (wntTest != null && PatchBuildingDamage.IsDestroyableWorldPiece(wntTest));
                 return true;
             }
             hit = default(RaycastHit);
@@ -1768,8 +1773,16 @@ namespace MegaShot
                     hitSomething = true;
                 }
 
+                // Only damage WearNTear if it's an allowlisted destroyable piece
+                // (Ashlands fortress doors/stairs/upper-walls). Non-allowlisted
+                // pieces — fortress walls, player builds, generic dungeon walls —
+                // are spared. Matches the AOE path's `IsDestroyableWorldPiece` gate.
                 var wnt = go.GetComponentInParent<WearNTear>();
-                if (wnt != null) { wnt.Damage(hitData); hitSomething = true; }
+                if (wnt != null && PatchBuildingDamage.IsDestroyableWorldPiece(wnt))
+                {
+                    wnt.Damage(hitData);
+                    hitSomething = true;
+                }
 
                 // Trees/logs are intentionally NOT damaged (Armageddon spares them).
                 // If we hit purely terrain or no recognised target, still trigger AOE so
