@@ -1753,10 +1753,20 @@ namespace MegaShot
                 if (dest != null) { dest.Damage(hitData); hitSomething = true; }
 
                 var rock5 = go.GetComponentInParent<MineRock5>();
-                if (rock5 != null) { rock5.Damage(hitData); hitSomething = true; }
+                if (rock5 != null)
+                {
+                    ArmageddonSuppression.MarkMineRockDestroyed();
+                    rock5.Damage(hitData);
+                    hitSomething = true;
+                }
 
                 var rock = go.GetComponentInParent<MineRock>();
-                if (rock != null) { rock.Damage(hitData); hitSomething = true; }
+                if (rock != null)
+                {
+                    ArmageddonSuppression.MarkMineRockDestroyed();
+                    rock.Damage(hitData);
+                    hitSomething = true;
+                }
 
                 var wnt = go.GetComponentInParent<WearNTear>();
                 if (wnt != null) { wnt.Damage(hitData); hitSomething = true; }
@@ -2927,6 +2937,7 @@ namespace MegaShot
                         {
                             if (processedRoots.Add(rock5.GetInstanceID()))
                             {
+                                ArmageddonSuppression.MarkMineRockDestroyed();
                                 if (rock5.GetComponent<DeferredMineRockDestroy>() == null)
                                 {
                                     var deferred = rock5.gameObject.AddComponent<DeferredMineRockDestroy>();
@@ -2946,6 +2957,7 @@ namespace MegaShot
                         {
                             if (processedRoots.Add(rock.GetInstanceID()))
                             {
+                                ArmageddonSuppression.MarkMineRockDestroyed();
                                 if (rock.GetComponent<DeferredMineRockDestroy>() == null)
                                 {
                                     var deferred = rock.gameObject.AddComponent<DeferredMineRockDestroy>();
@@ -3351,25 +3363,47 @@ namespace MegaShot
         private const float ActiveWindowSec = 5f;
         private static float lastBeamActiveTime = -999f;
 
-        // Resource junk names to swallow. Matched against
-        // `ItemDrop.m_itemData.m_shared.m_name` (localisation key).
-        // Scope: only plain Stone and plain Wood — the two overwhelming drops
-        // when Armageddon chews through rocks and trees/stumps. Everything else
-        // (finewood, corewood, elderbark, resin, flint, feathers, and all
-        // creature/loot drops like Fenris Hair + Red Jute) drops normally.
+        // Tier 1 — Stone + plain Wood. Always swallowed while the beam is
+        // active, regardless of what dropped them. These are the overwhelming
+        // bulk drops from generic rocks / trees / stumps and are useless at
+        // the scale Armageddon produces them.
         private static readonly HashSet<string> junkItemNames = new HashSet<string>
         {
             "$item_stone",
             "$item_wood"
         };
-
-        // Fallback: prefab/GameObject name match in case m_shared.m_name isn't
-        // populated yet at Awake time for some edge cases.
         private static readonly HashSet<string> junkPrefabNames = new HashSet<string>
         {
             "Stone",
             "Wood"
         };
+
+        // Tier 2 — MineRock-only junk. These items drop from BOTH natural rocks
+        // AND demolished buildings (Grausten in particular), but the player
+        // only wants to keep the building-demolition source. So these are only
+        // suppressed when a MineRock/MineRock5 was destroyed very recently.
+        // Building WearNTear destruction never opens the window.
+        private const float MineRockWindowSec = 1.5f;
+        private static float lastMineRockKillTime = -999f;
+
+        private static readonly HashSet<string> mineRockJunkItemNames = new HashSet<string>
+        {
+            "$item_grausten"
+        };
+        private static readonly HashSet<string> mineRockJunkPrefabNames = new HashSet<string>
+        {
+            "Grausten"
+        };
+
+        public static void MarkMineRockDestroyed()
+        {
+            lastMineRockKillTime = UnityEngine.Time.time;
+        }
+
+        private static bool IsMineRockWindowOpen()
+        {
+            return UnityEngine.Time.time - lastMineRockKillTime <= MineRockWindowSec;
+        }
 
         public static void MarkBeamActive()
         {
@@ -3456,15 +3490,25 @@ namespace MegaShot
             {
                 if (drop == null) return false;
                 var name = drop.m_itemData?.m_shared?.m_name;
-                if (!string.IsNullOrEmpty(name) && junkItemNames.Contains(name)) return true;
-
-                // Fallback: match against prefab/GameObject name (strip "(Clone)" suffix).
-                var goName = drop.gameObject != null ? drop.gameObject.name : null;
+                string goName = drop.gameObject != null ? drop.gameObject.name : null;
                 if (!string.IsNullOrEmpty(goName))
                 {
                     int paren = goName.IndexOf('(');
                     if (paren > 0) goName = goName.Substring(0, paren).TrimEnd();
-                    if (junkPrefabNames.Contains(goName)) return true;
+                }
+
+                // Tier 1 — always suppress.
+                if (!string.IsNullOrEmpty(name) && junkItemNames.Contains(name)) return true;
+                if (!string.IsNullOrEmpty(goName) && junkPrefabNames.Contains(goName)) return true;
+
+                // Tier 2 — only suppress if a MineRock/MineRock5 was destroyed
+                // within the last 1.5 s. Grausten from demolished Ashlands
+                // buildings stays on the ground; Grausten from Grausten rocks
+                // gets vaporised with the other bulk debris.
+                if (IsMineRockWindowOpen())
+                {
+                    if (!string.IsNullOrEmpty(name) && mineRockJunkItemNames.Contains(name)) return true;
+                    if (!string.IsNullOrEmpty(goName) && mineRockJunkPrefabNames.Contains(goName)) return true;
                 }
                 return false;
             }
