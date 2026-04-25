@@ -18,7 +18,7 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "`nBuild successful!" -ForegroundColor Green
 
-$srcDll = "MegaShot\bin\Release\net462\MegaShot.dll"
+$srcDll = "MegaShot\bin\Release\netstandard2.1\MegaShot.dll"
 $releaseDir = "..\Latest Release\MegaShot"
 $releasePath = Join-Path $releaseDir "MegaShot.dll"
 
