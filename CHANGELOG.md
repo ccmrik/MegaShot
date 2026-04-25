@@ -5,6 +5,12 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.11] - 2026-04-26
+
+### Fixed
+- **Ashlands Fortresses no longer vaporise under Armageddon.** The previous gate stripped chop/pickaxe on non-allowlisted WearNTear hits, but the Armageddon HitData carries 999999 on every other damage type — slash/blunt/fire/etc. — so vanilla still flattened the wall. `WearNTear.Damage` is now hard-blocked at the Prefix when the hit is Armageddon-tagged AND the piece isn't allowlisted (`Gate_Door`, `Ashland_Stair`, `Ashlands_Wall_2x2_top`). Alt-fire keeps its existing strip-and-pass behaviour because its bolt damage is small.
+- **Grausten from Grausten rocks is now reliably destroyed in Armageddon.** MineRock5 fractures into sub-areas with cascading drops that can spawn well after the initial Damage() call. The 1.5 s suppression window was too narrow under Armageddon's huge AOE radius, so Grausten kept landing on the ground after the window closed. Window extended to 10 s; each fresh MineRock hit refreshes it, so a continuous beam keeps it open.
+
 ## [2.6.10] - 2026-04-22
 
 ### Fixed

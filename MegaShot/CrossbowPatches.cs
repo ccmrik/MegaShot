@@ -2041,12 +2041,12 @@ namespace MegaShot
             return false;
         }
 
-        public static void Prefix(WearNTear __instance, HitData hit)
+        public static bool Prefix(WearNTear __instance, HitData hit)
         {
             try
             {
-                if (!MegaShotPlugin.ModEnabled.Value) return;
-                if (hit == null) return;
+                if (!MegaShotPlugin.ModEnabled.Value) return true;
+                if (hit == null) return true;
 
                 // --- Player-built buildings are EXCLUDED from destroy mode ---
                 // World-generated structures (Charred Fortress, dungeons, etc.) ARE destroyable.
@@ -2073,20 +2073,34 @@ namespace MegaShot
                         savedDamageModifiers = __instance.m_damages;
                         __instance.m_damages = new HitData.DamageModifiers();
                         DestroyObjectsHelper.TryApplyDestroyDamage(hit);
-                        return;
+                        return true;
                     }
 
-                    // Player-built buildings: strip destroy tags so vanilla damage
-                    // goes through normally, and mark for HouseFire spawn in Postfix.
+                    // Armageddon hits to non-whitelisted pieces (fortress walls,
+                    // generic dungeon walls, player builds) are hard-blocked here.
+                    // The Armageddon HitData carries 999999f on every damage type;
+                    // stripping just chop/pickaxe still leaves enough fire/blunt/
+                    // slash/etc. to flatten the wall through vanilla. Skip vanilla
+                    // Damage() entirely so non-whitelisted pieces take zero damage,
+                    // matching Alt-fire's effective behaviour with its small bolt
+                    // damages.
+                    if (DestroyObjectsHelper.IsArmageddonHit(hit))
+                    {
+                        return false;
+                    }
+
+                    // Alt-fire on player-built / non-whitelisted: strip destroy tags
+                    // so vanilla damage goes through with the bolt's per-type values
+                    // (small/moderate). HouseFire spawn happens in Postfix.
                     wasDestroyTagged = true;
                     savedHitPoint = hit.m_point;
                     // Strip destroy-level damage so the building takes normal hit
                     hit.m_damage.m_chop = 0f;
                     hit.m_damage.m_pickaxe = 0f;
-                    return;
+                    return true;
                 }
 
-                if (hit.m_skill != Skills.SkillType.Crossbows) return;
+                if (hit.m_skill != Skills.SkillType.Crossbows) return true;
 
                 // --- Building damage multiplier ---
                 float buildMult = MegaShotPlugin.BuildingDamage.Value;
@@ -2114,6 +2128,7 @@ namespace MegaShot
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return true;
         }
 
         public static void Postfix(WearNTear __instance, HitData hit)
@@ -3396,7 +3411,12 @@ namespace MegaShot
         // only wants to keep the building-demolition source. So these are only
         // suppressed when a MineRock/MineRock5 was destroyed very recently.
         // Building WearNTear destruction never opens the window.
-        private const float MineRockWindowSec = 1.5f;
+        // Window is generous (10 s) because MineRock5 fractures into sub-areas
+        // and cascading drops can spawn well after the initial Damage() call,
+        // especially under Armageddon's huge AOE radius. Each fresh hit on a
+        // MineRock pushes the window forward, so a continuous beam keeps it
+        // open indefinitely.
+        private const float MineRockWindowSec = 10f;
         private static float lastMineRockKillTime = -999f;
 
         private static readonly HashSet<string> mineRockJunkItemNames = new HashSet<string>
