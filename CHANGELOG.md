@@ -5,6 +5,11 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.14] - 2026-04-26
+
+### Fixed
+- **ALT-fire kills now drop everything as normal.** The AOE destroy pipeline was stamping `lastMineRockKillTime` on every MineRock / MineRock5 hit regardless of whether ALT (Destroy) or SHIFT (Armageddon) was the trigger. That opened the 15 s junk-drop suppression window on plain ALT shots, so stone/wood/grausten were getting deleted before they hit the ground. Both `MarkMineRockDestroyed()` calls in `TryAOEDestroy` are now gated on `isArmageddon` — only the Armageddon path can poison the suppression gate. ALT-fire returns to dropping the full loot.
+
 ## [2.6.11] - 2026-04-26
 
 ### Fixed

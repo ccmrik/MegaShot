@@ -2987,7 +2987,9 @@ namespace MegaShot
                         {
                             if (processedRoots.Add(rock5.GetInstanceID()))
                             {
-                                ArmageddonSuppression.MarkMineRockDestroyed();
+                                // Drop-suppression window is Armageddon-only. ALT-fire
+                                // kills must drop normally — never poison the gate.
+                                if (isArmageddon) ArmageddonSuppression.MarkMineRockDestroyed();
                                 if (rock5.GetComponent<DeferredMineRockDestroy>() == null)
                                 {
                                     var deferred = rock5.gameObject.AddComponent<DeferredMineRockDestroy>();
@@ -3007,7 +3009,7 @@ namespace MegaShot
                         {
                             if (processedRoots.Add(rock.GetInstanceID()))
                             {
-                                ArmageddonSuppression.MarkMineRockDestroyed();
+                                if (isArmageddon) ArmageddonSuppression.MarkMineRockDestroyed();
                                 if (rock.GetComponent<DeferredMineRockDestroy>() == null)
                                 {
                                     var deferred = rock.gameObject.AddComponent<DeferredMineRockDestroy>();
