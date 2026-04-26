@@ -3543,52 +3543,55 @@ namespace MegaShot
         // ore veins scatter drops well past any AOE+bounds radius we can register
         // when destruction cascades. Gating on "beam fired recently" catches
         // every junk drop regardless of where in the vein it spawned.
-        private const float ActiveWindowSec = 5f;
+        //
+        // Window bumped 5s → 15s in v2.6.13: MineRock5 fractures keep dropping
+        // items for many seconds after the beam stops, especially with the
+        // huge Armageddon AOE radius. The old 5s gate let late drops through.
+        private const float ActiveWindowSec = 15f;
         private static float lastBeamActiveTime = -999f;
 
-        // Tier 1 — Stone + plain Wood. Always swallowed while the beam is
-        // active, regardless of what dropped them. These are the overwhelming
-        // bulk drops from generic rocks / trees / stumps and are useless at
-        // the scale Armageddon produces them.
-        private static readonly HashSet<string> junkItemNames = new HashSet<string>
+        // Tier 1 — bulk drops always swallowed while the beam is recently
+        // active OR a MineRock was destroyed recently. These are the
+        // overwhelming bulk drops from generic rocks / trees / stumps /
+        // Ashlands Grausten mounds and are useless at the scale Armageddon
+        // produces them.
+        //
+        // Grausten was promoted to Tier 1 in v2.6.13 — the old "only when
+        // MineRock window open" gate was unreliable because deferred MineRock5
+        // sub-area damage spawns drops on a delayed RPC and the window was
+        // missing them. Plus there are multiple Ashlands sources (mounds,
+        // pillars, scattered rocks) and we want them all suppressed during
+        // Armageddon regardless of which sub-prefab dropped the item.
+        private static readonly HashSet<string> junkItemNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "$item_stone",
-            "$item_wood"
-        };
-        private static readonly HashSet<string> junkPrefabNames = new HashSet<string>
-        {
-            "Stone",
-            "Wood"
+            "$item_wood",
+            "$item_grausten",
         };
 
-        // Tier 2 — MineRock-only junk. These items drop from BOTH natural rocks
-        // AND demolished buildings (Grausten in particular), but the player
-        // only wants to keep the building-demolition source. So these are only
-        // suppressed when a MineRock/MineRock5 was destroyed very recently.
-        // Building WearNTear destruction never opens the window.
-        // Window is generous (10 s) because MineRock5 fractures into sub-areas
-        // and cascading drops can spawn well after the initial Damage() call,
-        // especially under Armageddon's huge AOE radius. Each fresh hit on a
-        // MineRock pushes the window forward, so a continuous beam keeps it
-        // open indefinitely.
-        private const float MineRockWindowSec = 10f;
+        // Substring matches (case-insensitive) on the dropped GameObject's
+        // name. Catches stacked / variant prefabs like "Grausten_Stack",
+        // "Stone_Heavy", etc. Stripped of "(Clone)" suffix before checking.
+        private static readonly string[] junkPrefabSubstrings = new string[]
+        {
+            "stone",
+            "wood",
+            "grausten",
+        };
+
+        // Independent secondary gate: if a MineRock/MineRock5 was destroyed
+        // within the last 15 s, junk-drop suppression stays active even if
+        // the beam itself stopped firing >15 s ago. Catches cascading drops
+        // from deferred sub-area destruction.
+        private const float MineRockWindowSec = 15f;
         private static float lastMineRockKillTime = -999f;
-
-        private static readonly HashSet<string> mineRockJunkItemNames = new HashSet<string>
-        {
-            "$item_grausten"
-        };
-        private static readonly HashSet<string> mineRockJunkPrefabNames = new HashSet<string>
-        {
-            "Grausten"
-        };
 
         public static void MarkMineRockDestroyed()
         {
             lastMineRockKillTime = UnityEngine.Time.time;
         }
 
-        private static bool IsMineRockWindowOpen()
+        public static bool IsMineRockWindowOpen()
         {
             return UnityEngine.Time.time - lastMineRockKillTime <= MineRockWindowSec;
         }
@@ -3685,22 +3688,39 @@ namespace MegaShot
                     if (paren > 0) goName = goName.Substring(0, paren).TrimEnd();
                 }
 
-                // Tier 1 — always suppress.
-                if (!string.IsNullOrEmpty(name) && junkItemNames.Contains(name)) return true;
-                if (!string.IsNullOrEmpty(goName) && junkPrefabNames.Contains(goName)) return true;
+                // Exact-match on the localised item name token (most reliable
+                // — same item can have multiple prefab variants but one
+                // shared.m_name).
+                if (!string.IsNullOrEmpty(name) && junkItemNames.Contains(name))
+                    return true;
 
-                // Tier 2 — only suppress if a MineRock/MineRock5 was destroyed
-                // within the last 1.5 s. Grausten from demolished Ashlands
-                // buildings stays on the ground; Grausten from Grausten rocks
-                // gets vaporised with the other bulk debris.
-                if (IsMineRockWindowOpen())
+                // Substring match on prefab GameObject name. Catches stacked
+                // / variant prefabs like Grausten_Stack, StoneFloor, etc.
+                // Stone/Wood/Grausten as substrings are unique enough that
+                // false positives are unlikely — and even if they happen the
+                // drop is just a junk debris item.
+                if (!string.IsNullOrEmpty(goName))
                 {
-                    if (!string.IsNullOrEmpty(name) && mineRockJunkItemNames.Contains(name)) return true;
-                    if (!string.IsNullOrEmpty(goName) && mineRockJunkPrefabNames.Contains(goName)) return true;
+                    for (int i = 0; i < junkPrefabSubstrings.Length; i++)
+                    {
+                        if (goName.IndexOf(junkPrefabSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                            return true;
+                    }
                 }
+
                 return false;
             }
             catch { return false; }
+        }
+
+        /// <summary>
+        /// Combined gate for drop suppression: true if either the beam was
+        /// fired recently OR a MineRock was destroyed recently. Either is
+        /// strong enough evidence that junk drops should be eaten.
+        /// </summary>
+        public static bool ShouldSuppressDropsNow()
+        {
+            return IsBeamRecentlyActive() || IsMineRockWindowOpen();
         }
 
         public static void TryDestroyDrop(ItemDrop drop)
@@ -3736,9 +3756,27 @@ namespace MegaShot
                 if (!MegaShotPlugin.ArmageddonSuppressDrops.Value) return;
                 if (__instance == null || __instance.gameObject == null) return;
 
-                if (!ArmageddonSuppression.IsBeamRecentlyActive()) return;
-                if (!ArmageddonSuppression.IsJunkItem(__instance)) return;
+                // Combined gate: beam recent OR MineRock recent. Either side
+                // catches drops; together they cover the full window of
+                // cascading deferred-destroy spawns.
+                if (!ArmageddonSuppression.ShouldSuppressDropsNow()) return;
 
+                bool isJunk = ArmageddonSuppression.IsJunkItem(__instance);
+
+                // Diagnostic: log every drop we see while the gate is open
+                // (regardless of suppression decision) so unexpected drops can
+                // be identified and added to the junk list. Only writes when
+                // DebugMode is on.
+                try
+                {
+                    string itemName = __instance.m_itemData?.m_shared?.m_name ?? "?";
+                    string goName = __instance.gameObject != null ? __instance.gameObject.name : "?";
+                    DiagnosticHelper.Log("ARMAG-DROP" + (isJunk ? "(suppress)" : "(keep)")
+                        + " name=" + itemName + " go=" + goName);
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+
+                if (!isJunk) return;
                 ArmageddonSuppression.TryDestroyDrop(__instance);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
