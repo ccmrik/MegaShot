@@ -1721,6 +1721,17 @@ namespace MegaShot
                 GameObject go = hit.collider.gameObject;
                 if (go == null) return;
 
+                // Armageddon target gate: bail out completely on spared targets
+                // (ore veins, food sources, drake nests, dungeon decor, etc.).
+                // Characters are always allowed through — the gate's component
+                // check returns false on Character roots so this is safe.
+                if (go.GetComponentInParent<Character>() == null
+                    && ArmageddonTargetFilter.IsSparedByArmageddon(go))
+                {
+                    DiagnosticHelper.Log("BEAM-SPARE: " + go.name);
+                    return;
+                }
+
                 // Build an Armageddon-tagged HitData. Marker (chop/pickaxe = 999998 + backstabBonus = -7777)
                 // routes through the existing destroy/AOE pipeline and spares trees.
                 HitData hitData = new HitData();
@@ -2955,6 +2966,17 @@ namespace MegaShot
                     GameObject go = col.gameObject;
                     if (go == null) continue;
 
+                    // Armageddon target gate: skip ore veins, food sources,
+                    // drake nests, dungeon decor, etc. Characters bypass the
+                    // gate (gate returns false on Characters anyway, but the
+                    // explicit check below also routes friendlies elsewhere).
+                    if (isArmageddon
+                        && go.GetComponentInParent<Character>() == null
+                        && ArmageddonTargetFilter.IsSparedByArmageddon(go))
+                    {
+                        continue;
+                    }
+
                     HitData aoeHit = CreateDestroyHitData(go.transform.position);
 
                     // --- MineRock5: defer destruction to next frame so RPCs work and drops spawn ---
@@ -3248,10 +3270,20 @@ namespace MegaShot
         private static HitData.DamageModifiers savedModifiers;
         private static Vector3 savedImpactPoint;
 
-        public static void Prefix(Destructible __instance, HitData hit)
+        public static bool Prefix(Destructible __instance, HitData hit)
         {
             try
             {
+                // Armageddon target gate (defence in depth): if this hit is
+                // Armageddon-tagged and the target is on the spare list, skip
+                // vanilla Damage() entirely so the destructible survives.
+                if (DestroyObjectsHelper.IsArmageddonHit(hit)
+                    && __instance != null
+                    && ArmageddonTargetFilter.IsSparedByArmageddon(__instance.gameObject))
+                {
+                    return false;
+                }
+
                 // Bypass damage modifiers (Immune/VeryResistant) for destroy-tagged bolts
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                 {
@@ -3273,6 +3305,7 @@ namespace MegaShot
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return true;
         }
         public static void Postfix(Destructible __instance, HitData hit)
         {
@@ -3298,17 +3331,27 @@ namespace MegaShot
     {
         private static Vector3 savedImpactPoint;
 
-        public static void Prefix(HitData hit)
+        public static bool Prefix(MineRock __instance, HitData hit)
         {
             try
             {
-                if (DestroyObjectsHelper.isDeferredDamage) return;
+                if (DestroyObjectsHelper.isDeferredDamage) return true;
+
+                // Armageddon target gate (defence in depth): spare ore veins
+                // and any other named-out targets even if a hit slips through.
+                if (DestroyObjectsHelper.IsArmageddonHit(hit)
+                    && __instance != null
+                    && ArmageddonTargetFilter.IsSparedByArmageddon(__instance.gameObject))
+                {
+                    return false;
+                }
 
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                     savedImpactPoint = hit.m_point;
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return true;
         }
         public static void Postfix(MineRock __instance, HitData hit)
         {
@@ -3334,12 +3377,22 @@ namespace MegaShot
         // Save the bolt's actual impact point BEFORE Damage() runs.
         private static Vector3 savedImpactPoint;
 
-        public static void Prefix(MineRock5 __instance, HitData hit)
+        public static bool Prefix(MineRock5 __instance, HitData hit)
         {
             try
             {
                 // Deferred damage from DeferredMineRockDestroy — let vanilla handle it clean
-                if (DestroyObjectsHelper.isDeferredDamage) return;
+                if (DestroyObjectsHelper.isDeferredDamage) return true;
+
+                // Armageddon target gate (defence in depth): spare silver
+                // veins, copper deposits, drake nests, etc. that slip through
+                // the upstream beam / AOE filters.
+                if (DestroyObjectsHelper.IsArmageddonHit(hit)
+                    && __instance != null
+                    && ArmageddonTargetFilter.IsSparedByArmageddon(__instance.gameObject))
+                {
+                    return false;
+                }
 
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                 {
@@ -3351,6 +3404,7 @@ namespace MegaShot
                 DestroyObjectsHelper.TryApplyDestroyDamage(hit);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return true;
         }
         public static void Postfix(MineRock5 __instance, HitData hit)
         {
@@ -3372,6 +3426,107 @@ namespace MegaShot
             // AOE destroy adjacent objects (trees, other rocks, etc.)
             try { DestroyObjectsHelper.TryAOEDestroy(hit, savedImpactPoint); }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+    }
+
+    // =========================================================================
+    // ARMAGEDDON TARGET FILTER
+    // Per Milord's spec: Armageddon Mode only destroys ground clutter —
+    // foliage shrubs, generic rocks, mountain/Mistlands stone, and Grausten
+    // mounds. Everything else (ore veins, food sources, drake nests, dungeon
+    // decor, runestones, chests, pickables) is SPARED so the player can still
+    // mine / harvest / loot it normally with vanilla tools.
+    //
+    // Strategy: blocklist by component (Pickable, Container) + prefab name
+    // substrings. Anything matching any spare rule survives Armageddon hits;
+    // everything else falls through to the existing destroy pipeline.
+    // =========================================================================
+    public static class ArmageddonTargetFilter
+    {
+        // Prefab name substrings (case-insensitive). Targets matching ANY of
+        // these are spared from Armageddon Mode damage. Direct beam hits and
+        // AOE radius hits both consult this gate.
+        //
+        // Be liberal — false positives (sparing something that could've been
+        // destroyed) are harmless; false negatives (destroying ore veins or
+        // food sources) are the bug we're fixing.
+        private static readonly string[] SparedSubstrings = new string[]
+        {
+            // ── Ore veins / valuable rocks ───────────────────────────────
+            "silvervein", "silver_vein",
+            "rock4_copper", "rock1_copper", "_copper", "copper_",
+            "rock4_tin", "_tin", "tin_", "minerock_tin",
+            "obsidian", "minerock_obsidian",
+            "meteor", "minerock_meteor",
+            "flametal",
+            "yggashoot", "yggdrasil",
+            // ── Drake nests / boss eggs ──────────────────────────────────
+            "dragonegg", "dragon_egg",
+            "drake_nest", "drakenest",
+            // ── Mistlands / Ashlands special structures ──────────────────
+            "dvergrtower", "dvergrprops", "dvergr_",
+            "giant_helmet", "giant_brain", "giantcorpse", "giant_skull",
+            "guck",
+            "shrine", "altar", "rune_", "runestone",
+            "leviathan",
+            "ymir", "ymirremains",
+            "beehive",
+            "stand_", "_stand",
+            "container", "chest_", "_chest",
+            "trader",
+            "spawner",
+            // ── Cave / dungeon decor (frost cave, swamp crypt, etc.) ─────
+            "stalagmite", "stalactite", "icicle",
+            "ice_", "iceblock", "iceblocker", "icerock", "icefloor", "icewall",
+            "frostcave", "froststone",
+            "cave_", "_cave",
+            "crypt", "burialchamber",
+            // ── Ashlands fortresses + charred (handled by WearNTear gate
+            //    too, but defensive name match here for any Destructibles) ─
+            "fortress",
+            "charred_",
+            // ── Pickable food / harvestables (Pickable component check
+            //    below also catches these — defence in depth) ─────────────
+            "pickable_",
+            "berrybush", "_berry", "raspberrybush", "blueberrybush",
+            "cloudberry", "vineberry", "vinebush",
+            "mushroom", "fiddlehead", "smokepuff",
+            "magecap", "jotunpuff",
+            "carrot", "turnip", "onion", "thistle", "barley", "flax",
+            "dandelion", "thistleflower",
+            // ── Trees (already spared via TreeBase patches — defensive) ──
+            "beech", "birch", "oak", "fir_", "pine", "spruce", "swamptree",
+            "ancienttree",
+        };
+
+        /// <summary>
+        /// Returns true if the given GameObject is on the Armageddon spare
+        /// list — by Pickable / Container component, or by prefab name match.
+        /// Callers should bail out before damaging when this returns true.
+        /// </summary>
+        public static bool IsSparedByArmageddon(GameObject go)
+        {
+            if (go == null) return true;
+            try
+            {
+                // Pickable = harvestable food / mat. Always spare.
+                if (go.GetComponentInParent<Pickable>() != null) return true;
+                // Container = chest / item stand. Always spare.
+                if (go.GetComponentInParent<Container>() != null) return true;
+
+                string name = go.name;
+                if (string.IsNullOrEmpty(name)) return false;
+                int paren = name.IndexOf('(');
+                if (paren > 0) name = name.Substring(0, paren).TrimEnd();
+
+                for (int i = 0; i < SparedSubstrings.Length; i++)
+                {
+                    if (name.IndexOf(SparedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return false;
         }
     }
 
