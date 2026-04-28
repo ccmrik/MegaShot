@@ -5,6 +5,16 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.18] - 2026-04-28
+
+### Fixed
+- **Small fir trees still standing.** v2.6.17 detected `FirTree_small` correctly as a small-tree variant but then *fell through* to the allow-name list — which had no pattern matching `FirTree_small` — so default-spare ate them. TreeBase branch now decides definitively: small/sapling/dead → allow destroy, full-grown → spare. No fall-through.
+- **Fallen old logs (`FirTree_oldLog`) spared.** The `_log` allow pattern is a literal substring, but `FirTree_oldLog` has `_oldLog` (underscore between `Tree` and `old`, not between `old` and `Log`). Added `oldlog`, `log_` patterns alongside `_log` and `fallenlog` so all log-naming conventions hit.
+- **Pine_tree | FirTree_small mixed-candidate case.** Multi-component objects could have one parent named `Pine_tree` (full-grown) and another `FirTree_small` (small) — the previous TreeBase check used only the TreeBase owner GO and missed the sibling small-tree signal. Now uses the unified candidate list.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `IsSparedByArmageddon` rewritten: builds candidates once at the top, reuses for TreeBase small detection and allow/block matching. New `ContainsAny(candidates, markers)` helper. `oldlog` + `log_` added to `AllowedSubstrings`.
+
 ## [2.6.17] - 2026-04-28
 
 ### Fixed

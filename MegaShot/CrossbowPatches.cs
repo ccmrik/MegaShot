@@ -3474,7 +3474,7 @@ namespace MegaShot
             "ashlands_stone",
             // ── Tree stumps & fallen logs ──
             "stub_", "stubbe",
-            "_log", "fallenlog",
+            "_log", "log_", "oldlog", "fallenlog",
         };
 
         // BLOCK overrides allow. Anything matching here is spared even if a
@@ -3537,9 +3537,6 @@ namespace MegaShot
             if (go == null) return true;
             try
             {
-                // ── Explicit allow: chopped fallen tree logs ──
-                if (go.GetComponentInParent<TreeLog>() != null) return false;
-
                 // ── Component spare: Pickable / Container / ItemStand ──
                 if (go.GetComponentInParent<Pickable>() != null) return true;
                 if (go.GetComponentInParent<Container>() != null) return true;
@@ -3547,65 +3544,65 @@ namespace MegaShot
 
                 // ── WearNTear: spare structures (fortresses, dungeons,
                 //    player builds) UNLESS the same root also has a
-                //    MineRock / MineRock5 / Destructible component, which
-                //    means it's worldgen ground clutter that just happens
-                //    to carry WearNTear too (Mistlands hybrid prefabs do
-                //    this). Component check alone was too aggressive.
+                //    MineRock / MineRock5 / Destructible — that means it's
+                //    worldgen ground clutter that just happens to carry
+                //    WearNTear too (Mistlands hybrid prefabs do this).
                 var wnt = go.GetComponentInParent<WearNTear>();
                 if (wnt != null)
                 {
                     bool alsoClutter = wnt.GetComponent<MineRock>() != null
                                     || wnt.GetComponent<MineRock5>() != null
                                     || wnt.GetComponent<Destructible>() != null;
-                    if (!alsoClutter) return true; // pure structure → spare
-                    // Hybrid → fall through to name match
+                    if (!alsoClutter) return true;
                 }
 
-                // TreeBase: spare full-grown trees only. Small / sapling /
-                // dead variants fall through to the allow path below.
+                // ── Build the unified name-candidate list once ──
+                // Sources: collider GO + each parent component owner +
+                // ZNetView root + transform.parent + transform.root.
+                // Mistlands MineRock5 in particular renames its internal
+                // mesh-filter GO and parks ZNetView there, so the prefab
+                // signal can sit on the collider GO instead of the root.
+                var candidates = CollectNameCandidates(go);
+
+                // ── Explicit allow: chopped fallen tree logs ──
+                if (go.GetComponentInParent<TreeLog>() != null) return false;
+
+                // ── TreeBase: spare full-grown trees only. Small/sapling/
+                //    dead variants are explicitly destroyable per Milord's
+                //    spec ("small trees / saplings"), so we MUST return
+                //    false (allow) — falling through to name match dropped
+                //    FirTree_small etc. into spare-by-default in v2.6.17.
                 var tb = go.GetComponentInParent<TreeBase>();
                 if (tb != null)
                 {
-                    bool isSmallTree = AnyCandidateContains(tb.gameObject, SmallTreeMarkers);
-                    if (!isSmallTree) return true;
+                    if (ContainsAny(candidates, SmallTreeMarkers)) return false;
+                    return true;
                 }
 
-                // ── Build name-match candidates ──
-                // (a) the collider GO itself (Mistlands MineRock5 cells
-                //     embed the prefab name here),
-                // (b) every interesting component owner's GO,
-                // (c) the ZNetView root,
-                // (d) transform.root.
-                // Match block / allow against ANY of them.
-                var candidates = CollectNameCandidates(go);
                 if (candidates.Count == 0) return true;
 
-                for (int c = 0; c < candidates.Count; c++)
-                {
-                    string n = candidates[c];
-                    for (int i = 0; i < BlockedSubstrings.Length; i++)
-                    {
-                        if (n.IndexOf(BlockedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
-                            return true;
-                    }
-                }
+                if (ContainsAny(candidates, BlockedSubstrings)) return true;
+                if (ContainsAny(candidates, AllowedSubstrings)) return false;
 
-                for (int c = 0; c < candidates.Count; c++)
-                {
-                    string n = candidates[c];
-                    for (int i = 0; i < AllowedSubstrings.Length; i++)
-                    {
-                        if (n.IndexOf(AllowedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
-                            return false;
-                    }
-                }
-
-                // Diagnostic — log unique unmatched candidate sets so we
-                // can extend the allowlist. Deduped to avoid 100×/sec spam.
+                // Diagnostic — log unique unmatched candidate sets.
                 LogUnmatchedOnce(candidates);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             return true;
+        }
+
+        private static bool ContainsAny(List<string> candidates, string[] markers)
+        {
+            for (int c = 0; c < candidates.Count; c++)
+            {
+                string n = candidates[c];
+                for (int m = 0; m < markers.Length; m++)
+                {
+                    if (n.IndexOf(markers[m], StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+                }
+            }
+            return false;
         }
 
         private static readonly string[] SmallTreeMarkers = new string[]
@@ -3628,16 +3625,6 @@ namespace MegaShot
                     DiagnosticHelper.Log("ARMAG-SPARE(unmatched): " + key);
             }
             catch { }
-        }
-
-        private static bool AnyCandidateContains(GameObject anchor, string[] markers)
-        {
-            var cands = CollectNameCandidates(anchor);
-            for (int i = 0; i < cands.Count; i++)
-                for (int j = 0; j < markers.Length; j++)
-                    if (cands[i].IndexOf(markers[j], StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true;
-            return false;
         }
 
         /// <summary>
