@@ -3515,7 +3515,10 @@ namespace MegaShot
             // ── Ore veins (drop valuable mats) ──
             "copper", "_tin", "tin_", "silver", "iron",
             "meteor", "obsidian", "flametal",
-            "yggashoot", "yggdrasil",
+            // (v2.6.22: yggashoot / yggdrasil REMOVED from block —
+            //  Milord wants Yggdrasil shoots destroyed; YggdrasilWood
+            //  drops survive the `wood` prefix junk-suppression because
+            //  the prefab name starts with "Yggdrasil", not "Wood".)
             // ── Ashlands skeletal remains / soft tissue / charred sources ──
             "bone", "softtissue", "soft_tissue",
             "ashlandsbone", "ashlandstorment",

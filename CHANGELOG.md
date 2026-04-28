@@ -5,6 +5,14 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.22] - 2026-04-28
+
+### Changed
+- **Yggdrasil shoots (`YggaShoot1`, `YggaShoot2`, etc.) destroyable.** Removed `yggashoot` and `yggdrasil` from the block-name list per Milord's spec — the shoots break and drop `YggdrasilWood`. The junk-drop prefix suppression only catches names starting with `wood` / `stone` / `grausten`; `YggdrasilWood` starts with "Yggdrasil" so the drop survives.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `BlockedSubstrings` -= `yggashoot`, `yggdrasil`.
+
 ## [2.6.21] - 2026-04-28
 
 ### Fixed
