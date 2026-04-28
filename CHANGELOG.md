@@ -5,6 +5,18 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.20] - 2026-04-28
+
+### Fixed
+- **Mistlands rock formations + Ashlands cliffs spared.** The v2.6.19 ZDO-prefab dump revealed prefab names that weren't on the allowlist: `MistlandRockFormation`, `MistlandRockFormation_2_Fractured`, `cliff_mistlands1_frac`, `cliff_mistlands2_frac`, `cliff_ashlands5/6`, `BigRock_cell.*`, `HeathRockPillar`. Added `mistlandrockformation`, `cliff_mistlands`, `cliff_ashlands`, `bigrock`, `heathrockpillar` to the allow-name list.
+- **Black Forest small firs (`FirTree_small`, `FirTree_small_dead`) spared.** These don't carry a `TreeBase` component, so v2.6.18's TreeBase branch never fired. Added `_small`, `_dead`, `sapling` as fallback name patterns to the allow list — anything matching those substrings (and not blocked by the block list / component spare) destroys.
+
+### Changed (perf)
+- **FX suppression window extended 0.3s → 5s.** Big MineRock5s use a deferred destroy that keeps spawning sub-area shatter / dust / sound effects for several seconds after the beam stops. The old 0.3s window only covered live beam-fire ticks, so post-beam fracture FX spammed and froze the game. Loot-bearing effects (m_destroyedEffect prefabs containing ItemDrop) are still preserved via the cached `EffectListHasItemDrop` check.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `AllowedSubstrings` += `bigrock`, `mistlandrockformation`, `heathrockpillar`, `cliff_mistlands`, `cliff_ashlands`, `_small`, `_dead`, `sapling`. `ArmageddonSuppression.IsBeamFiringNow()` window extended to 5s.
+
 ## [2.6.19] - 2026-04-28
 
 ### Fixed

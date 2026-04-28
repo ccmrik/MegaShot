@@ -3461,6 +3461,14 @@ namespace MegaShot
             "rock_destructible",
             "rock_3", "rock_4",
             "rock1_", "rock2_", "rock3_", "rock4_", "rock5_",
+            // ── Big-rock cells and Mistlands rock formations
+            //    (revealed by v2.6.19 ZDO-prefab dump) ──
+            "bigrock",
+            "mistlandrockformation",
+            "heathrockpillar",
+            // ── Mistlands / Ashlands cliff faces (mineable cliff_X_frac
+            //    plus the unfractured visual cliffs) ──
+            "cliff_mistlands", "cliff_ashlands",
             // ── Mountain / Mistlands / Ashlands stone (MineRock + MineRock5) ──
             "minerock_meadows",
             "minerock_blackforest",
@@ -3478,6 +3486,10 @@ namespace MegaShot
             // ── Tree stumps & fallen logs ──
             "stub_", "stubbe",
             "_log", "log_", "oldlog", "fallenlog",
+            // ── Small / sapling / dead trees (some have no TreeBase
+            //    component, so the TreeBase branch misses them — caught
+            //    here as a name-pattern fallback) ──
+            "_small", "_dead", "sapling",
         };
 
         // BLOCK overrides allow. Anything matching here is spared even if a
@@ -3799,13 +3811,17 @@ namespace MegaShot
             return UnityEngine.Time.time - lastBeamActiveTime <= ActiveWindowSec;
         }
 
-        // Tighter window for FX suppression — we only want cosmetic VFX / SFX
-        // muted while the beam is actually firing (plus a couple of frames of
-        // grace for in-flight destroy calls). Drop suppression uses the wider
-        // 5s window because drops can spawn a second or two after Damage().
+        // FX suppression window. v2.6.20 extended from 0.3s → 5s so the
+        // MineRock5 deferred sub-area destruction (which can keep playing
+        // shatter / dust / sound effects for several seconds after the
+        // beam stops) is also covered. Big rocks at high AOE radius were
+        // spawning hundreds of cosmetic effects per second post-beam,
+        // freezing the game. Loot effects (m_destroyedEffect with an
+        // ItemDrop-bearing prefab) are still preserved via the cached
+        // EffectListHasItemDrop check downstream.
         public static bool IsBeamFiringNow()
         {
-            return UnityEngine.Time.time - lastBeamActiveTime <= 0.3f;
+            return UnityEngine.Time.time - lastBeamActiveTime <= 5f;
         }
 
         // FX suppression safety gate: some destructibles (Guck sacks, beehives,
