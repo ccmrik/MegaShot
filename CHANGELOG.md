@@ -5,6 +5,18 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.16] - 2026-04-28
+
+### Fixed
+- **Armageddon was sparing everything** because the new allowlist used `go.name` from `hit.collider.gameObject` — that's typically a child node ("Collider", "model", "area_0"), not the prefab root. With name-substring matching against the wrong string, no allow pattern ever fired and v2.6.15 turned into a no-op. Now resolves the canonical prefab name via `ZNetView.GetPrefabName()` (with a transform-root fallback). Direct hits and AOE on rocks/shrubs/grausten/mountain stone destroy as intended.
+- **Black Forest small firs (and other small / sapling / dead trees) now destroyable.** v2.6.15's blanket TreeBase spare was too coarse — Milord's spec has small trees / saplings on the destroy list. TreeBase now spares full-grown trees only; prefab names containing `small`, `sapling`, or `_dead` fall through to the allow path so `FirTree_small1`, `Beech_small2`, `Sapling_Pine`, etc. take damage. Full trees (`FirTree`, `Beech1`, `Pine_tree`, `Oak1`, `SwampTree*`, `AncientTree`) still spared.
+
+### Added
+- **Diagnostic line for unmatched targets.** When DebugMode is on, any prefab name that hits the spare-by-default branch (no allow, no block, not a component-spare) gets logged as `ARMAG-SPARE(unmatched): <name>`. Send the dump if anything Milord expects to be destroyed survives — we'll allowlist the name.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `ArmageddonTargetFilter.ResolvePrefabName()` helper added; `IsSparedByArmageddon` switched to it; TreeBase branch now consults the small/sapling/dead name signal before sparing.
+
 ## [2.6.15] - 2026-04-28
 
 ### Changed

@@ -3546,15 +3546,32 @@ namespace MegaShot
                 // Milord's v2.6.15 spec: zero structure damage in Armageddon.
                 if (go.GetComponentInParent<WearNTear>() != null) return true;
                 if (go.GetComponentInParent<ItemStand>() != null) return true;
-                // TreeBase covers full-grown trees. Saplings (Sapling_*)
-                // are Pickables, caught above; small visual trees (Beech_small,
-                // Birch_small) carry TreeBase too and stay spared.
-                if (go.GetComponentInParent<TreeBase>() != null) return true;
 
-                string name = go.name;
+                // TreeBase: spare full-grown trees only. Per Milord's spec,
+                // small trees / saplings / dead stumps remain destroyable
+                // (Black Forest small firs, beech_small, sapling_pine, etc.).
+                // v2.6.16: prior blanket TreeBase spare left the small firs
+                // standing.
+                var tb = go.GetComponentInParent<TreeBase>();
+                if (tb != null)
+                {
+                    string tname = ResolvePrefabName(tb.gameObject);
+                    bool isSmallTree = !string.IsNullOrEmpty(tname)
+                        && (tname.IndexOf("small", StringComparison.OrdinalIgnoreCase) >= 0
+                         || tname.IndexOf("sapling", StringComparison.OrdinalIgnoreCase) >= 0
+                         || tname.IndexOf("_dead", StringComparison.OrdinalIgnoreCase) >= 0);
+                    if (!isSmallTree) return true; // spare full-grown trees
+                    // Small / sapling / dead → fall through; allowed below
+                }
+
+                // Resolve the canonical prefab name. The collider's own
+                // GameObject is often a child like "Collider" / "model" /
+                // "area_0" — using go.name there never matches any allow
+                // pattern and we'd spare everything (v2.6.15.0 bug). Walk
+                // up via ZNetView.GetPrefabName() first, fall back to the
+                // transform root's name (strip "(Clone)").
+                string name = ResolvePrefabName(go);
                 if (string.IsNullOrEmpty(name)) return true;
-                int paren = name.IndexOf('(');
-                if (paren > 0) name = name.Substring(0, paren).TrimEnd();
 
                 // ── Block-name overrides: even if an allow pattern would
                 //    match (e.g. "rock4_copper" matches "rock4_"), block
@@ -3571,10 +3588,42 @@ namespace MegaShot
                     if (name.IndexOf(AllowedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
                         return false;
                 }
+
+                // Diagnostic: name was non-empty but matched neither block
+                // nor allow → defaulting to spare. Helps Milord identify
+                // ground clutter we forgot to allowlist.
+                DiagnosticHelper.Log("ARMAG-SPARE(unmatched): " + name);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             // Default: spare. Allowlist-based — unknown targets survive.
             return true;
+        }
+
+        /// <summary>
+        /// Resolves the canonical prefab name for an arbitrary GameObject.
+        /// Walks up to the ZNetView root (Valheim attaches ZNetView to the
+        /// prefab root, so its GameObject.name is the prefab name plus
+        /// "(Clone)"). Falls back to transform.root if no ZNetView is found.
+        /// </summary>
+        private static string ResolvePrefabName(GameObject go)
+        {
+            try
+            {
+                if (go == null) return null;
+                GameObject root = null;
+                var nv = go.GetComponentInParent<ZNetView>();
+                if (nv != null) root = nv.gameObject;
+                if (root == null && go.transform != null && go.transform.root != null)
+                    root = go.transform.root.gameObject;
+                if (root == null) root = go;
+
+                string n = root.name;
+                if (string.IsNullOrEmpty(n)) return null;
+                int paren = n.IndexOf('(');
+                if (paren > 0) n = n.Substring(0, paren).TrimEnd();
+                return n;
+            }
+            catch { return null; }
         }
     }
 
