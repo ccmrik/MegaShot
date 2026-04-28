@@ -3500,6 +3500,8 @@ namespace MegaShot
             // ── Tree stumps & fallen logs ──
             "stub_", "stubbe",
             "_log", "log_", "oldlog", "fallenlog",
+            // ── Ashlands fallen branches (drop Ashwood) ──
+            "ashlandsbranch",
             // ── Small / sapling / dead trees (some have no TreeBase
             //    component, so the TreeBase branch misses them — caught
             //    here as a name-pattern fallback) ──

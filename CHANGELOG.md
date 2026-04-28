@@ -5,6 +5,17 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.23] - 2026-04-28
+
+### Fixed
+- **Ashlands fallen branches (`AshlandsBranch1` / `AshlandsBranch2` / `AshlandsBranch3`) destroyable.** Showed up in the v2.6.22 dump as unmatched. Added `ashlandsbranch` to the allow-name list. Drops `Ashwood`, which survives the v2.6.19 prefix junk-suppression (only `wood` / `stone` / `grausten` prefixes are eaten; `Ashwood` starts with "Ash").
+
+### Notes
+- Charred ruins, Dvergr town walls, cave-rock decor, gravestones, Stonehenge `Stone1_huge`, fish, ferns, dropped items (Wood, Blackwood, Resin, Stone) all show up in the unmatched log but are correctly spared per Milord's "ground clutter only" spec — they're not on the destroy list.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `AllowedSubstrings` += `ashlandsbranch`.
+
 ## [2.6.22] - 2026-04-28
 
 ### Changed
