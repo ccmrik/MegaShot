@@ -5,6 +5,18 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.21] - 2026-04-28
+
+### Fixed
+- **Small trees in Meadows + Black Forest still standing** even though the spare gate cleared them. Two stale Armageddon-skip paths from the original "spare all trees" era:
+  - **AOE TreeBase branch** in `TryAOEDestroy` was explicitly skipping damage when `isArmageddon` was true (just adding to `processedRoots` to prevent re-processing). Now damages on both paths — the upstream spare gate is the source of truth, and full-grown trees never reach here in Armageddon.
+  - **`ApplyBeamHit` had no TreeBase / TreeLog branch at all.** Direct beam hits on a small tree did nothing locally; only the AOE fallback could maybe catch it (and it was bugged too). Added explicit `TreeBase.Damage()` and `TreeLog.Damage()` calls so direct hits land.
+
+Drops (seeds, ashwood, etc.) flow through vanilla `m_dropWhenDestroyed` — only `Wood` itself gets junk-suppressed by the v2.6.19 prefix match; `BeechSeeds`, `BirchSeeds`, `FirCone`, `PineCone`, `Ashwood` are preserved.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `TryAOEDestroy` TreeBase branch damages on Armageddon too. `ApplyBeamHit` adds `TreeBase` / `TreeLog` direct-damage calls.
+
 ## [2.6.20] - 2026-04-28
 
 ### Fixed

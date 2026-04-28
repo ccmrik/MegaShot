@@ -1792,8 +1792,18 @@ namespace MegaShot
                 // only nominally hit Gate_Door / Ashland_Stair. Hard-blocked
                 // here AND in the WearNTear.Damage Prefix.
 
-                // Trees are intentionally NOT damaged (Armageddon spares them).
-                // Fallen logs (TreeLog) ARE allowed via the AOE path below.
+                // v2.6.21: TreeBase + TreeLog direct hits. The spare gate
+                // above already filters full-grown trees; reaching here in
+                // Armageddon means the target is a small / sapling / dead
+                // variant or a fallen log — explicitly destroyable per
+                // Milord's spec. Drops (seeds, ashwood, etc.) flow through
+                // vanilla `m_dropWhenDestroyed`.
+                var tree = go.GetComponentInParent<TreeBase>();
+                if (tree != null) { tree.Damage(hitData); hitSomething = true; }
+
+                var tlog = go.GetComponentInParent<TreeLog>();
+                if (tlog != null) { tlog.Damage(hitData); hitSomething = true; }
+
                 // If we hit purely terrain or no recognised target, still trigger AOE so
                 // surrounding rocks/saplings get vaporised at the impact point.
                 if (!hitSomething)
@@ -3020,17 +3030,21 @@ namespace MegaShot
                     }
                     catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
-                    // --- Trees --- (Armageddon spares trees and logs)
+                    // --- Trees ---
+                    // v2.6.21: damage TreeBase in Armageddon too. Full-grown
+                    // trees are already filtered upstream by the spare gate
+                    // (TreeBase + no small/sapling/dead marker → spare). By
+                    // the time we reach this branch in Armageddon, the spare
+                    // gate has explicitly cleared it (small / sapling / dead
+                    // tree per Milord's spec). Drops (seeds, etc.) fire via
+                    // vanilla `m_dropWhenDestroyed` — only `Wood` itself gets
+                    // junk-suppressed; seeds are preserved.
                     try
                     {
                         var tree = go.GetComponentInParent<TreeBase>();
                         if (tree != null)
                         {
-                            if (isArmageddon)
-                            {
-                                processedRoots.Add(tree.GetInstanceID());
-                            }
-                            else if (processedRoots.Add(tree.GetInstanceID()))
+                            if (processedRoots.Add(tree.GetInstanceID()))
                             {
                                 tree.Damage(aoeHit);
                                 ForceDestroyIfNeeded(tree, aoeHit, "TreeBase(AOE)");
