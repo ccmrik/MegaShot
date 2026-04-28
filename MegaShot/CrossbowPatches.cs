@@ -1728,7 +1728,8 @@ namespace MegaShot
                 if (go.GetComponentInParent<Character>() == null
                     && ArmageddonTargetFilter.IsSparedByArmageddon(go))
                 {
-                    DiagnosticHelper.Log("BEAM-SPARE: " + go.name);
+                    // (No per-tick log — IsSparedByArmageddon already
+                    // logs unique unmatched targets via LogUnmatchedOnce.)
                     return;
                 }
 
@@ -3523,9 +3524,13 @@ namespace MegaShot
         /// ground-clutter matches (shrubs, rocks, grausten, fallen logs,
         /// stumps, mountain stone) pass through to the destroy pipeline.
         ///
-        /// Component checks come first: Pickable/Container/WearNTear/
-        /// ItemStand/TreeBase parents = always spare. TreeLog parents =
-        /// always allow (per Milord's spec, fallen logs are destroyable).
+        /// v2.6.17: name match runs against MULTIPLE candidate strings
+        /// (collider GO + each component owner's GO + transform root),
+        /// not a single resolved name. Mistlands MineRock5s in particular
+        /// rename their internal mesh-filter GO to "___MineRock5 m_meshFilter"
+        /// and ZNetView lives on it, so any single resolution path would
+        /// miss the actual prefab name (which only appears on the collider
+        /// GO, e.g. "Rock_3_Untitled_31_cell.020").
         /// </summary>
         public static bool IsSparedByArmageddon(GameObject go)
         {
@@ -3533,97 +3538,159 @@ namespace MegaShot
             try
             {
                 // ── Explicit allow: chopped fallen tree logs ──
-                // TreeLog parents bypass the spare gate — fallen logs are
-                // listed in Milord's destroy spec. Substring "_log" also
-                // catches them but only if their prefab name has it; this
-                // is the load-bearing rule.
                 if (go.GetComponentInParent<TreeLog>() != null) return false;
 
-                // ── Component spare: anything inside these is off-limits ──
+                // ── Component spare: Pickable / Container / ItemStand ──
                 if (go.GetComponentInParent<Pickable>() != null) return true;
                 if (go.GetComponentInParent<Container>() != null) return true;
-                // WearNTear covers fortresses, dungeon walls, player builds.
-                // Milord's v2.6.15 spec: zero structure damage in Armageddon.
-                if (go.GetComponentInParent<WearNTear>() != null) return true;
                 if (go.GetComponentInParent<ItemStand>() != null) return true;
 
-                // TreeBase: spare full-grown trees only. Per Milord's spec,
-                // small trees / saplings / dead stumps remain destroyable
-                // (Black Forest small firs, beech_small, sapling_pine, etc.).
-                // v2.6.16: prior blanket TreeBase spare left the small firs
-                // standing.
+                // ── WearNTear: spare structures (fortresses, dungeons,
+                //    player builds) UNLESS the same root also has a
+                //    MineRock / MineRock5 / Destructible component, which
+                //    means it's worldgen ground clutter that just happens
+                //    to carry WearNTear too (Mistlands hybrid prefabs do
+                //    this). Component check alone was too aggressive.
+                var wnt = go.GetComponentInParent<WearNTear>();
+                if (wnt != null)
+                {
+                    bool alsoClutter = wnt.GetComponent<MineRock>() != null
+                                    || wnt.GetComponent<MineRock5>() != null
+                                    || wnt.GetComponent<Destructible>() != null;
+                    if (!alsoClutter) return true; // pure structure → spare
+                    // Hybrid → fall through to name match
+                }
+
+                // TreeBase: spare full-grown trees only. Small / sapling /
+                // dead variants fall through to the allow path below.
                 var tb = go.GetComponentInParent<TreeBase>();
                 if (tb != null)
                 {
-                    string tname = ResolvePrefabName(tb.gameObject);
-                    bool isSmallTree = !string.IsNullOrEmpty(tname)
-                        && (tname.IndexOf("small", StringComparison.OrdinalIgnoreCase) >= 0
-                         || tname.IndexOf("sapling", StringComparison.OrdinalIgnoreCase) >= 0
-                         || tname.IndexOf("_dead", StringComparison.OrdinalIgnoreCase) >= 0);
-                    if (!isSmallTree) return true; // spare full-grown trees
-                    // Small / sapling / dead → fall through; allowed below
+                    bool isSmallTree = AnyCandidateContains(tb.gameObject, SmallTreeMarkers);
+                    if (!isSmallTree) return true;
                 }
 
-                // Resolve the canonical prefab name. The collider's own
-                // GameObject is often a child like "Collider" / "model" /
-                // "area_0" — using go.name there never matches any allow
-                // pattern and we'd spare everything (v2.6.15.0 bug). Walk
-                // up via ZNetView.GetPrefabName() first, fall back to the
-                // transform root's name (strip "(Clone)").
-                string name = ResolvePrefabName(go);
-                if (string.IsNullOrEmpty(name)) return true;
+                // ── Build name-match candidates ──
+                // (a) the collider GO itself (Mistlands MineRock5 cells
+                //     embed the prefab name here),
+                // (b) every interesting component owner's GO,
+                // (c) the ZNetView root,
+                // (d) transform.root.
+                // Match block / allow against ANY of them.
+                var candidates = CollectNameCandidates(go);
+                if (candidates.Count == 0) return true;
 
-                // ── Block-name overrides: even if an allow pattern would
-                //    match (e.g. "rock4_copper" matches "rock4_"), block
-                //    "copper" wins. Always check blocks first.
-                for (int i = 0; i < BlockedSubstrings.Length; i++)
+                for (int c = 0; c < candidates.Count; c++)
                 {
-                    if (name.IndexOf(BlockedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
-                        return true;
+                    string n = candidates[c];
+                    for (int i = 0; i < BlockedSubstrings.Length; i++)
+                    {
+                        if (n.IndexOf(BlockedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                            return true;
+                    }
                 }
 
-                // ── Allow-name list ──
-                for (int i = 0; i < AllowedSubstrings.Length; i++)
+                for (int c = 0; c < candidates.Count; c++)
                 {
-                    if (name.IndexOf(AllowedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
-                        return false;
+                    string n = candidates[c];
+                    for (int i = 0; i < AllowedSubstrings.Length; i++)
+                    {
+                        if (n.IndexOf(AllowedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                            return false;
+                    }
                 }
 
-                // Diagnostic: name was non-empty but matched neither block
-                // nor allow → defaulting to spare. Helps Milord identify
-                // ground clutter we forgot to allowlist.
-                DiagnosticHelper.Log("ARMAG-SPARE(unmatched): " + name);
+                // Diagnostic — log unique unmatched candidate sets so we
+                // can extend the allowlist. Deduped to avoid 100×/sec spam.
+                LogUnmatchedOnce(candidates);
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-            // Default: spare. Allowlist-based — unknown targets survive.
             return true;
         }
 
-        /// <summary>
-        /// Resolves the canonical prefab name for an arbitrary GameObject.
-        /// Walks up to the ZNetView root (Valheim attaches ZNetView to the
-        /// prefab root, so its GameObject.name is the prefab name plus
-        /// "(Clone)"). Falls back to transform.root if no ZNetView is found.
-        /// </summary>
-        private static string ResolvePrefabName(GameObject go)
+        private static readonly string[] SmallTreeMarkers = new string[]
+        {
+            "small", "sapling", "_dead",
+        };
+
+        // Per-prefab-name dedupe for the unmatched diagnostic — same key
+        // logged once per session keeps the log readable when the beam
+        // sweeps over hundreds of identical objects.
+        private static readonly HashSet<string> _loggedUnmatched =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        private static void LogUnmatchedOnce(List<string> candidates)
         {
             try
             {
-                if (go == null) return null;
-                GameObject root = null;
-                var nv = go.GetComponentInParent<ZNetView>();
-                if (nv != null) root = nv.gameObject;
-                if (root == null && go.transform != null && go.transform.root != null)
-                    root = go.transform.root.gameObject;
-                if (root == null) root = go;
-
-                string n = root.name;
-                if (string.IsNullOrEmpty(n)) return null;
-                int paren = n.IndexOf('(');
-                if (paren > 0) n = n.Substring(0, paren).TrimEnd();
-                return n;
+                string key = string.Join(" | ", candidates);
+                if (_loggedUnmatched.Add(key))
+                    DiagnosticHelper.Log("ARMAG-SPARE(unmatched): " + key);
             }
-            catch { return null; }
+            catch { }
+        }
+
+        private static bool AnyCandidateContains(GameObject anchor, string[] markers)
+        {
+            var cands = CollectNameCandidates(anchor);
+            for (int i = 0; i < cands.Count; i++)
+                for (int j = 0; j < markers.Length; j++)
+                    if (cands[i].IndexOf(markers[j], StringComparison.OrdinalIgnoreCase) >= 0)
+                        return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Builds the list of name strings to substring-match against:
+        /// the GO's own name, each interesting parent component's GO name,
+        /// the ZNetView root's GO name, and transform.root's GO name. Each
+        /// stripped of "(Clone)" and de-duplicated.
+        /// </summary>
+        private static List<string> CollectNameCandidates(GameObject go)
+        {
+            var list = new List<string>(8);
+            if (go == null) return list;
+            try
+            {
+                AddName(list, go);
+
+                var nv = go.GetComponentInParent<ZNetView>();
+                if (nv != null) AddName(list, nv.gameObject);
+
+                var rock5 = go.GetComponentInParent<MineRock5>();
+                if (rock5 != null) AddName(list, rock5.gameObject);
+
+                var rock = go.GetComponentInParent<MineRock>();
+                if (rock != null) AddName(list, rock.gameObject);
+
+                var dest = go.GetComponentInParent<Destructible>();
+                if (dest != null) AddName(list, dest.gameObject);
+
+                var tree = go.GetComponentInParent<TreeBase>();
+                if (tree != null) AddName(list, tree.gameObject);
+
+                if (go.transform != null && go.transform.parent != null)
+                    AddName(list, go.transform.parent.gameObject);
+
+                if (go.transform != null && go.transform.root != null)
+                    AddName(list, go.transform.root.gameObject);
+            }
+            catch { }
+            return list;
+        }
+
+        private static void AddName(List<string> list, GameObject g)
+        {
+            if (g == null) return;
+            string n = g.name;
+            if (string.IsNullOrEmpty(n)) return;
+            int paren = n.IndexOf('(');
+            if (paren > 0) n = n.Substring(0, paren).TrimEnd();
+            // Dedupe (case-insensitive).
+            for (int i = 0; i < list.Count; i++)
+                if (string.Equals(list[i], n, StringComparison.OrdinalIgnoreCase))
+                    return;
+            list.Add(n);
         }
     }
 

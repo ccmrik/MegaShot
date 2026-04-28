@@ -5,6 +5,19 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.17] - 2026-04-28
+
+### Fixed
+- **Mistlands rocks were still spared after v2.6.16's prefab-name fix.** The diagnostic dump showed why: Valheim renames a MineRock5's internal mesh-filter GameObject to `___MineRock5 m_meshFilter` and parks the `ZNetView` on it — so walking the parent chain to the ZNetView root pulls that runtime-internal name, not the prefab name. Meanwhile the actual prefab signal (`Rock_3_…`) lives on the *collider* GO. Single-name resolution misses one or the other.
+  - Now matches against a **list of name candidates** built from the collider GO + each parent component's owner GO (`MineRock5`, `MineRock`, `Destructible`, `TreeBase`, `ZNetView`) + `transform.parent` + `transform.root`. If ANY candidate matches an allow pattern, destroy. If ANY matches a block pattern, spare.
+- **WearNTear hybrid rocks no longer spared.** Some Mistlands ground prefabs carry both WearNTear and a MineRock / MineRock5 / Destructible — the v2.6.15 blanket WearNTear spare ate them. Now only spares WearNTear when the same root has no clutter component (true structures: fortresses, dungeon walls, player builds).
+
+### Changed
+- **Diagnostic spam reduced.** `ARMAG-SPARE(unmatched): …` is now deduped per unique candidate-set per session (instead of writing 100×/sec while the beam sweeps over identical objects). Removed the per-tick `BEAM-SPARE: <colliderName>` line since the unmatched-once diagnostic carries the same info.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `ArmageddonTargetFilter.IsSparedByArmageddon` rewritten around `CollectNameCandidates` + multi-candidate match; WearNTear branch checks for clutter-component co-residence; per-key dedupe via `_loggedUnmatched`; `ApplyBeamHit` no longer writes `BEAM-SPARE`.
+
 ## [2.6.16] - 2026-04-28
 
 ### Fixed
