@@ -5,6 +5,20 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.19] - 2026-04-28
+
+### Fixed
+- **Mistlands MineRock5 still spared.** For some Mistlands rocks every name candidate resolved to `___MineRock5 m_meshFilter` — the runtime-renamed internal GO that hosts the ZNetView. The actual prefab name (e.g. `rock_mistlands1`) wasn't recoverable from the live hierarchy. Same root cause for Ashlands Grausten. **Fix:** new candidate source — `ZNetView → ZDO → GetPrefab(hash) → ZNetScene.GetPrefab(hash).name` resolves the canonical prefab name from Valheim's prefab registry regardless of runtime renames. Mistlands rocks and Grausten mounds now match their allow patterns.
+- **Mistlands `rock_mistlands1` / `rock_mistlands2` etc.** added to the allow-name list (was missing — only `rock1_…rock4_` patterns were there, which don't match the `rock_mistlands` naming).
+- **`Pickable_DolmenTreasure` defense in depth.** Added `pickable_` to the block-name list so prefabs named `Pickable_*` are spared even when the actual `Pickable` component lives outside `GetComponentInParent`'s walk.
+- **Ashwood / FineWood / Roundlog drops were being eaten by junk-drop suppression.** The substring match on `wood` caught every wood-suffix prefab. Switched to prefix match — only GO names that START WITH `wood` / `stone` / `grausten` (and their stack variants) are suppressed. Ashwood / FineWood / Roundlog / ElderBark / AshlandsWood / Yggdrasil_wood now drop normally during Armageddon sweeps.
+
+### Changed
+- **Diagnostics now write to BepInEx LogOutput.log** instead of the separate `MegaShot_Diagnostic.txt`. Goes through the standard MegaLoad LogOutput export — no more copy-paste from a side file. Tagged as `[Info: MegaShot.Diag]` / `[Warning: MegaShot.Diag]`.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `DiagnosticHelper` rewritten around `BepInEx.Logging.ManualLogSource`. `CollectNameCandidates` adds `ResolvePrefabNameFromZDO` as another source. `AllowedSubstrings` += `rock_mistlands`, `BlockedSubstrings` += `pickable_`. `junkPrefabSubstrings` → `junkPrefabPrefixes` with `StartsWith` matching.
+
 ## [2.6.18] - 2026-04-28
 
 ### Fixed

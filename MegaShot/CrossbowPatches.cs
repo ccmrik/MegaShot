@@ -8,21 +8,22 @@ using System.IO;
 namespace MegaShot
 {
     // =========================================================================
-    // DIAGNOSTIC — writes ALT-fire hit info to BepInEx/MegaShot_Diagnostic.txt.
+    // DIAGNOSTIC — writes ALT-fire / Armageddon hit info to the BepInEx
+    // LogOutput.log (v2.6.19+). Previously wrote to a separate
+    // MegaShot_Diagnostic.txt; merged into the main log so dumps go via the
+    // standard MegaLoad LogOutput export and don't need separate copy-paste.
     // Controlled by config: 8. Debug > Enabled (default: off).
-    // Shows prefab names, component types, HP, tier for identifying fortress pieces.
     // =========================================================================
     public static class DiagnosticHelper
     {
-        private static string _logPath;
-
-        private static string LogPath
+        private static BepInEx.Logging.ManualLogSource _logSource;
+        private static BepInEx.Logging.ManualLogSource LogSource
         {
             get
             {
-                if (_logPath == null)
-                    _logPath = Path.Combine(BepInEx.Paths.BepInExRootPath, "MegaShot_Diagnostic.txt");
-                return _logPath;
+                if (_logSource == null)
+                    _logSource = BepInEx.Logging.Logger.CreateLogSource("MegaShot.Diag");
+                return _logSource;
             }
         }
 
@@ -31,7 +32,7 @@ namespace MegaShot
             try
             {
                 if (!MegaShotPlugin.DebugMode.Value) return;
-                File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " " + message + "\n");
+                LogSource.LogInfo(message);
             }
             catch { }
         }
@@ -42,7 +43,7 @@ namespace MegaShot
             try
             {
                 if (!MegaShotPlugin.DebugMode.Value) return;
-                File.AppendAllText(LogPath, DateTime.Now.ToString("HH:mm:ss") + " [EX] " + context + ": " + ex.Message + "\n");
+                LogSource.LogWarning("[EX] " + context + ": " + ex.Message);
             }
             catch { }
         }
@@ -3469,6 +3470,8 @@ namespace MegaShot
             "minerock_mistlands",
             "minerock_ashlands",
             "minerock_stone",
+            // ── Mistlands rock prefabs (rock_mistlands1, rock_mistlands2, …) ──
+            "rock_mistlands",
             // ── Grausten mounds / pillars / Ashlands stone variants ──
             "grausten",
             "ashlands_stone",
@@ -3516,6 +3519,9 @@ namespace MegaShot
             // ── Item stands / chests (component check below also catches them) ──
             "stand_", "_stand",
             "chest_", "_chest", "container",
+            // ── Pickable_* prefabs (defense in depth — some are missing
+            //    the actual Pickable component on the parent we walk) ──
+            "pickable_",
         };
 
         /// <summary>
@@ -3630,19 +3636,27 @@ namespace MegaShot
         /// <summary>
         /// Builds the list of name strings to substring-match against:
         /// the GO's own name, each interesting parent component's GO name,
-        /// the ZNetView root's GO name, and transform.root's GO name. Each
-        /// stripped of "(Clone)" and de-duplicated.
+        /// the ZNetView root's GO name, transform.parent / .root, AND the
+        /// canonical prefab name resolved via ZDO → ZNetScene.GetPrefab(hash).
+        /// Mistlands MineRock5 in particular renames its internal mesh-filter
+        /// GO to "___MineRock5 m_meshFilter" and parks ZNetView there, so the
+        /// only way to recover the real prefab name (e.g. "rock_mistlands1")
+        /// is the ZDO lookup. Each stripped of "(Clone)" and de-duplicated.
         /// </summary>
         private static List<string> CollectNameCandidates(GameObject go)
         {
-            var list = new List<string>(8);
+            var list = new List<string>(10);
             if (go == null) return list;
             try
             {
                 AddName(list, go);
 
                 var nv = go.GetComponentInParent<ZNetView>();
-                if (nv != null) AddName(list, nv.gameObject);
+                if (nv != null)
+                {
+                    AddName(list, nv.gameObject);
+                    AddRawName(list, ResolvePrefabNameFromZDO(nv));
+                }
 
                 var rock5 = go.GetComponentInParent<MineRock5>();
                 if (rock5 != null) AddName(list, rock5.gameObject);
@@ -3666,14 +3680,39 @@ namespace MegaShot
             return list;
         }
 
+        /// <summary>
+        /// Asks Valheim's prefab registry for the canonical prefab name
+        /// behind this ZNetView's ZDO. Returns null if the ZDO / scene /
+        /// prefab can't be resolved (e.g. during world load). The name is
+        /// the prefab's authoring name with no "(Clone)" suffix.
+        /// </summary>
+        private static string ResolvePrefabNameFromZDO(ZNetView nv)
+        {
+            try
+            {
+                if (nv == null) return null;
+                var zdo = nv.GetZDO();
+                if (zdo == null) return null;
+                int hash = zdo.GetPrefab();
+                var scene = ZNetScene.instance;
+                if (scene == null) return null;
+                var prefab = scene.GetPrefab(hash);
+                return prefab != null ? prefab.name : null;
+            }
+            catch { return null; }
+        }
+
         private static void AddName(List<string> list, GameObject g)
         {
             if (g == null) return;
-            string n = g.name;
-            if (string.IsNullOrEmpty(n)) return;
-            int paren = n.IndexOf('(');
-            if (paren > 0) n = n.Substring(0, paren).TrimEnd();
-            // Dedupe (case-insensitive).
+            AddRawName(list, g.name);
+        }
+
+        private static void AddRawName(List<string> list, string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return;
+            int paren = raw.IndexOf('(');
+            string n = (paren > 0) ? raw.Substring(0, paren).TrimEnd() : raw;
             for (int i = 0; i < list.Count; i++)
                 if (string.Equals(list[i], n, StringComparison.OrdinalIgnoreCase))
                     return;
@@ -3720,10 +3759,13 @@ namespace MegaShot
             "$item_grausten",
         };
 
-        // Substring matches (case-insensitive) on the dropped GameObject's
-        // name. Catches stacked / variant prefabs like "Grausten_Stack",
-        // "Stone_Heavy", etc. Stripped of "(Clone)" suffix before checking.
-        private static readonly string[] junkPrefabSubstrings = new string[]
+        // Prefix matches (case-insensitive) on the dropped GameObject's
+        // name (stripped of "(Clone)"). Match if the GO name STARTS WITH
+        // the prefix — catches stacked / variant prefabs like "Grausten_Stack"
+        // and "Wood_pile" while leaving Ashwood, FineWood, Roundlog,
+        // ElderBark, AshlandsWood, etc. alone (they don't start with
+        // "wood"). v2.6.18 used substring match which ate Ashwood drops.
+        private static readonly string[] junkPrefabPrefixes = new string[]
         {
             "stone",
             "wood",
@@ -3845,16 +3887,17 @@ namespace MegaShot
                 if (!string.IsNullOrEmpty(name) && junkItemNames.Contains(name))
                     return true;
 
-                // Substring match on prefab GameObject name. Catches stacked
-                // / variant prefabs like Grausten_Stack, StoneFloor, etc.
-                // Stone/Wood/Grausten as substrings are unique enough that
-                // false positives are unlikely — and even if they happen the
-                // drop is just a junk debris item.
+                // Prefix match on prefab GameObject name (v2.6.19: was
+                // substring match, which ate Ashwood / FineWood / Roundlog
+                // because all three contain "wood"). Now requires the GO
+                // name to START WITH "wood" / "stone" / "grausten" so only
+                // standalone Wood drops (and stack variants like Wood_pile,
+                // Grausten_Stack, Stone_Heavy) get suppressed.
                 if (!string.IsNullOrEmpty(goName))
                 {
-                    for (int i = 0; i < junkPrefabSubstrings.Length; i++)
+                    for (int i = 0; i < junkPrefabPrefixes.Length; i++)
                     {
-                        if (goName.IndexOf(junkPrefabSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                        if (goName.StartsWith(junkPrefabPrefixes[i], StringComparison.OrdinalIgnoreCase))
                             return true;
                     }
                 }
