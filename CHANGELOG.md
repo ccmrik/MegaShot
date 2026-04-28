@@ -5,6 +5,21 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.15] - 2026-04-28
+
+### Changed
+- **Armageddon target gate flipped from blocklist to strict allowlist.** Per Milord's spec, Armageddon now destroys ground clutter only — foliage shrubs, generic rocks, mountain / Mistlands stone, Grausten mounds, fallen logs, and tree stumps. Everything else is spared by default. Previously the gate enumerated specific things to spare and destroyed the rest, so each new bug ("fortresses still falling", "skeletal remains gone", "soft tissue gone", "black marble eaten") meant adding another opt-out. The allowlist makes spare-by-default the rule.
+
+### Fixed
+- **Ashlands Fortresses no longer fall under Armageddon — period.** v2.6.10/v2.6.11 only allowlisted three fortress pieces (`Gate_Door`, `Ashland_Stair`, `Ashlands_Wall_2x2_top`), but those pieces propagated structural-support failures through the rest of the fortress and the whole thing collapsed anyway. `WearNTear.Damage` Prefix now hard-blocks every Armageddon hit on every WearNTear piece, the AOE loop's WearNTear branch is gated on `!isArmageddon`, and `ApplyBeamHit` no longer calls `wnt.Damage()` on Armageddon hits. Three layers of defence, no fortress damage. ALT-fire's `IsDestroyableWorldPiece` allowlist is unchanged (you can still demolish fortress doors/stairs with ALT bolts).
+- **Skeletal remains and soft tissue sources spared.** Added `bone`, `softtissue`, `soft_tissue`, `ashlandsbone`, `ashlandstorment`, `hairstrand`, `charred_` to the block-name list so Ashlands biomass MineRocks survive Armageddon hits.
+- **Obsidian and black marble spared.** Added `marble`, `blackmarble`, `black_marble` to the block-name list. Obsidian was already there.
+- **Frost-cave / crypt / dungeon decor spared by default** via the new allowlist — frost-cave loot run no longer eats every wall, stalagmite, and ice block when you sweep the beam.
+- **Fallen logs (TreeLog) now destroyable in Armageddon.** Per Milord's spec — fallen logs are explicit ground clutter. `TreeLog` parents bypass the spare gate; the AOE loop's `TreeLog` branch damages on both ALT-fire and Armageddon paths now.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `ArmageddonTargetFilter` rewritten as allowlist, `PatchBuildingDamage.Prefix` hard-blocks all Armageddon WearNTear hits, `ApplyBeamHit` drops the WearNTear damage call on Armageddon, `TryAOEDestroy` gates WearNTear branch on `!isArmageddon` and allows `TreeLog` damage in Armageddon.
+
 ## [2.6.14] - 2026-04-26
 
 ### Fixed

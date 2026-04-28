@@ -1784,18 +1784,14 @@ namespace MegaShot
                     hitSomething = true;
                 }
 
-                // Only damage WearNTear if it's an allowlisted destroyable piece
-                // (Ashlands fortress doors/stairs/upper-walls). Non-allowlisted
-                // pieces — fortress walls, player builds, generic dungeon walls —
-                // are spared. Matches the AOE path's `IsDestroyableWorldPiece` gate.
-                var wnt = go.GetComponentInParent<WearNTear>();
-                if (wnt != null && PatchBuildingDamage.IsDestroyableWorldPiece(wnt))
-                {
-                    wnt.Damage(hitData);
-                    hitSomething = true;
-                }
+                // Armageddon (v2.6.15): never damages WearNTear pieces —
+                // fortresses, dungeon walls, player builds. The structural-
+                // support cascade was levelling whole fortresses even when we
+                // only nominally hit Gate_Door / Ashland_Stair. Hard-blocked
+                // here AND in the WearNTear.Damage Prefix.
 
-                // Trees/logs are intentionally NOT damaged (Armageddon spares them).
+                // Trees are intentionally NOT damaged (Armageddon spares them).
+                // Fallen logs (TreeLog) ARE allowed via the AOE path below.
                 // If we hit purely terrain or no recognised target, still trigger AOE so
                 // surrounding rocks/saplings get vaporised at the impact point.
                 if (!hitSomething)
@@ -2059,8 +2055,22 @@ namespace MegaShot
                 if (!MegaShotPlugin.ModEnabled.Value) return true;
                 if (hit == null) return true;
 
+                // --- Armageddon hard-block (v2.6.15): zero WearNTear damage ---
+                // Per Milord's spec, Armageddon never damages structures —
+                // fortresses, dungeon walls, player builds. The previous
+                // IsDestroyableWorldPiece allowlist (Gate_Door / Ashland_Stair /
+                // Ashlands_Wall_2x2_top) cascaded structural-support failures
+                // through the rest of the fortress, so the whole thing fell.
+                // Block at the source: if it's an Armageddon hit, refuse.
+                if (DestroyObjectsHelper.IsArmageddonHit(hit))
+                {
+                    return false;
+                }
+
                 // --- Player-built buildings are EXCLUDED from destroy mode ---
-                // World-generated structures (Charred Fortress, dungeons, etc.) ARE destroyable.
+                // World-generated structures (Charred Fortress, dungeons, etc.)
+                // ARE destroyable via ALT-fire bolts (kept unchanged from
+                // pre-2.6.15 behaviour).
                 if (DestroyObjectsHelper.IsDestroyTagged(hit))
                 {
                     bool canDestroy = IsDestroyableWorldPiece(__instance);
@@ -2085,19 +2095,6 @@ namespace MegaShot
                         __instance.m_damages = new HitData.DamageModifiers();
                         DestroyObjectsHelper.TryApplyDestroyDamage(hit);
                         return true;
-                    }
-
-                    // Armageddon hits to non-whitelisted pieces (fortress walls,
-                    // generic dungeon walls, player builds) are hard-blocked here.
-                    // The Armageddon HitData carries 999999f on every damage type;
-                    // stripping just chop/pickaxe still leaves enough fire/blunt/
-                    // slash/etc. to flatten the wall through vanilla. Skip vanilla
-                    // Damage() entirely so non-whitelisted pieces take zero damage,
-                    // matching Alt-fire's effective behaviour with its small bolt
-                    // damages.
-                    if (DestroyObjectsHelper.IsArmageddonHit(hit))
-                    {
-                        return false;
                     }
 
                     // Alt-fire on player-built / non-whitelisted: strip destroy tags
@@ -3045,11 +3042,10 @@ namespace MegaShot
                         var log = go.GetComponentInParent<TreeLog>();
                         if (log != null)
                         {
-                            if (isArmageddon)
-                            {
-                                processedRoots.Add(log.GetInstanceID());
-                            }
-                            else if (processedRoots.Add(log.GetInstanceID()))
+                            // v2.6.15: fallen logs (chopped tree segments) are
+                            // explicitly destroyable per Milord's allowlist —
+                            // both ALT-fire and Armageddon damage them.
+                            if (processedRoots.Add(log.GetInstanceID()))
                             {
                                 log.Damage(aoeHit);
                                 ForceDestroyIfNeeded(log, aoeHit, "TreeLog(AOE)");
@@ -3072,7 +3068,10 @@ namespace MegaShot
                         }
                     }
                     catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-                    // Buildings: only destroy specific world pieces (doors, stairs) in AOE
+                    // Buildings: only destroy specific world pieces (doors, stairs) in AOE.
+                    // v2.6.15: Armageddon never damages WearNTear (no fortress / dungeon
+                    // / player build hits) — even nominally-allowlisted pieces cascaded
+                    // through structural support and flattened the rest.
                     try
                     {
                         var wnt = go.GetComponentInParent<WearNTear>();
@@ -3080,7 +3079,7 @@ namespace MegaShot
                         {
                             if (processedRoots.Add(wnt.GetInstanceID()))
                             {
-                                if (PatchBuildingDamage.IsDestroyableWorldPiece(wnt))
+                                if (!isArmageddon && PatchBuildingDamage.IsDestroyableWorldPiece(wnt))
                                     wnt.Damage(aoeHit);
                             }
                             continue;
@@ -3433,102 +3432,149 @@ namespace MegaShot
 
     // =========================================================================
     // ARMAGEDDON TARGET FILTER
-    // Per Milord's spec: Armageddon Mode only destroys ground clutter —
-    // foliage shrubs, generic rocks, mountain/Mistlands stone, and Grausten
-    // mounds. Everything else (ore veins, food sources, drake nests, dungeon
-    // decor, runestones, chests, pickables) is SPARED so the player can still
-    // mine / harvest / loot it normally with vanilla tools.
+    // Per Milord's spec (v2.6.15): Armageddon destroys ground clutter ONLY —
+    // shrubs, saplings, generic rocks, mountain stone, Grausten mounds, and
+    // fallen logs. Default = SPARE everything else.
     //
-    // Strategy: blocklist by component (Pickable, Container) + prefab name
-    // substrings. Anything matching any spare rule survives Armageddon hits;
-    // everything else falls through to the existing destroy pipeline.
+    // Earlier versions used a sprawling blocklist (spare these specific
+    // things, destroy the rest). That kept springing leaks — fortresses,
+    // skeletal remains, soft tissue, black marble all fell through. Flipped
+    // to an allowlist: a target must explicitly match a "destroyable" rule
+    // to be hit; anything unmatched survives.
+    //
+    // Pipeline: TreeLog allow → component spare (Pickable/Container/WearNTear/
+    // ItemStand/TreeBase) → block-name override (ores, biomass, marble) →
+    // allow-name match → default SPARE.
     // =========================================================================
     public static class ArmageddonTargetFilter
     {
-        // Prefab name substrings (case-insensitive). Targets matching ANY of
-        // these are spared from Armageddon Mode damage. Direct beam hits and
-        // AOE radius hits both consult this gate.
-        //
-        // Be liberal — false positives (sparing something that could've been
-        // destroyed) are harmless; false negatives (destroying ore veins or
-        // food sources) are the bug we're fixing.
-        private static readonly string[] SparedSubstrings = new string[]
+        // Prefab name substrings (case-insensitive). Hitting ANY of these
+        // makes the target destroyable in Armageddon. Order doesn't matter —
+        // any match passes, no match = spared.
+        private static readonly string[] AllowedSubstrings = new string[]
         {
-            // ── Ore veins / valuable rocks ───────────────────────────────
-            "silvervein", "silver_vein",
-            "rock4_copper", "rock1_copper", "_copper", "copper_",
-            "rock4_tin", "_tin", "tin_", "minerock_tin",
-            "obsidian", "minerock_obsidian",
-            "meteor", "minerock_meteor",
-            "flametal",
+            // ── Foliage shrubs (cosmetic destructibles, no Pickable) ──
+            "bush", "shrub",
+            // ── Generic rocks (Destructible + small MineRock that drops Stone) ──
+            "rock_destructible",
+            "rock_3", "rock_4",
+            "rock1_", "rock2_", "rock3_", "rock4_", "rock5_",
+            // ── Mountain / Mistlands / Ashlands stone (MineRock + MineRock5) ──
+            "minerock_meadows",
+            "minerock_blackforest",
+            "minerock_mountain",
+            "minerock_swamp",
+            "minerock_plains",
+            "minerock_mistlands",
+            "minerock_ashlands",
+            "minerock_stone",
+            // ── Grausten mounds / pillars / Ashlands stone variants ──
+            "grausten",
+            "ashlands_stone",
+            // ── Tree stumps & fallen logs ──
+            "stub_", "stubbe",
+            "_log", "fallenlog",
+        };
+
+        // BLOCK overrides allow. Anything matching here is spared even if a
+        // (more general) allow pattern would have matched it. Covers ore
+        // veins, Ashlands biomass sources, black marble, and named-out
+        // dungeon / world specials.
+        private static readonly string[] BlockedSubstrings = new string[]
+        {
+            // ── Ore veins (drop valuable mats) ──
+            "copper", "_tin", "tin_", "silver", "iron",
+            "meteor", "obsidian", "flametal",
             "yggashoot", "yggdrasil",
-            // ── Drake nests / boss eggs ──────────────────────────────────
+            // ── Ashlands skeletal remains / soft tissue / charred sources ──
+            "bone", "softtissue", "soft_tissue",
+            "ashlandsbone", "ashlandstorment",
+            "hairstrand", "charred_",
+            // ── Black marble (Mistlands building material) ──
+            "marble", "blackmarble", "black_marble",
+            // ── Dragon eggs, drake nests, leviathans, ymir remains ──
             "dragonegg", "dragon_egg",
             "drake_nest", "drakenest",
-            // ── Mistlands / Ashlands special structures ──────────────────
-            "dvergrtower", "dvergrprops", "dvergr_",
-            "giant_helmet", "giant_brain", "giantcorpse", "giant_skull",
-            "guck",
-            "shrine", "altar", "rune_", "runestone",
             "leviathan",
             "ymir", "ymirremains",
-            "beehive",
-            "stand_", "_stand",
-            "container", "chest_", "_chest",
+            // ── Dungeon / world specials ──
+            "guck",
+            "shrine", "altar",
+            "rune_", "runestone",
             "trader",
             "spawner",
-            // ── Cave / dungeon decor (frost cave, swamp crypt, etc.) ─────
+            // ── Frost-cave / crypt decor (drops nothing useful but
+            //    spawns inside dungeons we don't want gutted) ──
             "stalagmite", "stalactite", "icicle",
             "ice_", "iceblock", "iceblocker", "icerock", "icefloor", "icewall",
             "frostcave", "froststone",
-            "cave_", "_cave",
             "crypt", "burialchamber",
-            // ── Ashlands fortresses + charred (handled by WearNTear gate
-            //    too, but defensive name match here for any Destructibles) ─
-            "fortress",
-            "charred_",
-            // ── Pickable food / harvestables (Pickable component check
-            //    below also catches these — defence in depth) ─────────────
-            "pickable_",
-            "berrybush", "_berry", "raspberrybush", "blueberrybush",
-            "cloudberry", "vineberry", "vinebush",
-            "mushroom", "fiddlehead", "smokepuff",
-            "magecap", "jotunpuff",
-            "carrot", "turnip", "onion", "thistle", "barley", "flax",
-            "dandelion", "thistleflower",
-            // ── Trees (already spared via TreeBase patches — defensive) ──
-            "beech", "birch", "oak", "fir_", "pine", "spruce", "swamptree",
-            "ancienttree",
+            // ── Mistlands special ──
+            "dvergrtower", "dvergrprops", "dvergr_",
+            "giant_helmet", "giant_brain", "giantcorpse", "giant_skull",
+            // ── Item stands / chests (component check below also catches them) ──
+            "stand_", "_stand",
+            "chest_", "_chest", "container",
         };
 
         /// <summary>
-        /// Returns true if the given GameObject is on the Armageddon spare
-        /// list — by Pickable / Container component, or by prefab name match.
-        /// Callers should bail out before damaging when this returns true.
+        /// Returns true if Armageddon must SKIP damaging this target.
+        /// Allowlist-based: the default is to spare. Only explicit
+        /// ground-clutter matches (shrubs, rocks, grausten, fallen logs,
+        /// stumps, mountain stone) pass through to the destroy pipeline.
+        ///
+        /// Component checks come first: Pickable/Container/WearNTear/
+        /// ItemStand/TreeBase parents = always spare. TreeLog parents =
+        /// always allow (per Milord's spec, fallen logs are destroyable).
         /// </summary>
         public static bool IsSparedByArmageddon(GameObject go)
         {
             if (go == null) return true;
             try
             {
-                // Pickable = harvestable food / mat. Always spare.
+                // ── Explicit allow: chopped fallen tree logs ──
+                // TreeLog parents bypass the spare gate — fallen logs are
+                // listed in Milord's destroy spec. Substring "_log" also
+                // catches them but only if their prefab name has it; this
+                // is the load-bearing rule.
+                if (go.GetComponentInParent<TreeLog>() != null) return false;
+
+                // ── Component spare: anything inside these is off-limits ──
                 if (go.GetComponentInParent<Pickable>() != null) return true;
-                // Container = chest / item stand. Always spare.
                 if (go.GetComponentInParent<Container>() != null) return true;
+                // WearNTear covers fortresses, dungeon walls, player builds.
+                // Milord's v2.6.15 spec: zero structure damage in Armageddon.
+                if (go.GetComponentInParent<WearNTear>() != null) return true;
+                if (go.GetComponentInParent<ItemStand>() != null) return true;
+                // TreeBase covers full-grown trees. Saplings (Sapling_*)
+                // are Pickables, caught above; small visual trees (Beech_small,
+                // Birch_small) carry TreeBase too and stay spared.
+                if (go.GetComponentInParent<TreeBase>() != null) return true;
 
                 string name = go.name;
-                if (string.IsNullOrEmpty(name)) return false;
+                if (string.IsNullOrEmpty(name)) return true;
                 int paren = name.IndexOf('(');
                 if (paren > 0) name = name.Substring(0, paren).TrimEnd();
 
-                for (int i = 0; i < SparedSubstrings.Length; i++)
+                // ── Block-name overrides: even if an allow pattern would
+                //    match (e.g. "rock4_copper" matches "rock4_"), block
+                //    "copper" wins. Always check blocks first.
+                for (int i = 0; i < BlockedSubstrings.Length; i++)
                 {
-                    if (name.IndexOf(SparedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                    if (name.IndexOf(BlockedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
                         return true;
+                }
+
+                // ── Allow-name list ──
+                for (int i = 0; i < AllowedSubstrings.Length; i++)
+                {
+                    if (name.IndexOf(AllowedSubstrings[i], StringComparison.OrdinalIgnoreCase) >= 0)
+                        return false;
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-            return false;
+            // Default: spare. Allowlist-based — unknown targets survive.
+            return true;
         }
     }
 
