@@ -2608,33 +2608,73 @@ namespace MegaShot
             var colField = hitAreaType.GetField("m_collider",
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
-            for (int i = 0; i < hitAreas.Count; i++)
+            // Strip damage modifiers to bypass Immune / VeryResistant on
+            // Mistlands MineRock5s — the chunked-but-not-destroyed bug
+            // (v2.6.24). DamageArea applies the area's resists *before*
+            // health subtraction; if the area is Immune, even 999999 turns
+            // into 0. Save and restore so other code paths see normal modifiers.
+            HitData.DamageModifiers savedMods = default;
+            bool modsSaved = false;
+            try
             {
-                var area = hitAreas[i];
-                if (area == null) continue;
+                savedMods = rock.m_damageModifiers;
+                rock.m_damageModifiers = new HitData.DamageModifiers();
+                modsSaved = true;
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
-                Collider col = null;
-                if (colField != null)
-                    col = colField.GetValue(area) as Collider;
-
-                if (col == null || !col.enabled) continue;
-
-                if (aoeRadius <= 1f)
+            int areasHit = 0;
+            try
+            {
+                for (int i = 0; i < hitAreas.Count; i++)
                 {
-                    float dist = Vector3.Distance(impactPoint, col.bounds.center);
-                    if (dist > aoeRadius) continue;
-                }
+                    var area = hitAreas[i];
+                    if (area == null) continue;
 
-                // Call DamageArea(index, hit) directly � synchronous, no RPCs
-                HitData areaHit = CreateDestroyHit(col.bounds.center);
-                try
-                {
-                    damageAreaMethod.Invoke(rock, new object[] { i, areaHit });
-                }
-                catch
-                {
+                    Collider col = null;
+                    if (colField != null)
+                        col = colField.GetValue(area) as Collider;
+
+                    if (col == null || !col.enabled) continue;
+
+                    if (aoeRadius <= 1f)
+                    {
+                        float dist = Vector3.Distance(impactPoint, col.bounds.center);
+                        if (dist > aoeRadius) continue;
+                    }
+
+                    HitData areaHit = CreateDestroyHit(col.bounds.center);
+                    try
+                    {
+                        damageAreaMethod.Invoke(rock, new object[] { i, areaHit });
+                        areasHit++;
+                    }
+                    catch { }
                 }
             }
+            finally
+            {
+                if (modsSaved)
+                {
+                    try { rock.m_damageModifiers = savedMods; }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                }
+            }
+
+            // Cleanup pass — if anything visible survived (areas with disabled
+            // colliders, areas the reflection missed, sub-meshes Valheim hides
+            // post-DamageArea but doesn't despawn), nuke the whole prefab via
+            // ZNetView.Destroy. Loot already spawned during the DamageArea
+            // calls so we're not stealing drops.
+            try
+            {
+                var nv = rock.GetComponent<ZNetView>();
+                if (nv != null && nv.IsValid() && rock.gameObject != null)
+                {
+                    DestroyObjectsHelper.ForceDestroyObject(rock, "MineRock5(deferred-cleanup)");
+                }
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         private static HitData CreateDestroyHit(Vector3 point)
@@ -2671,6 +2711,35 @@ namespace MegaShot
         private static bool isApplyingAOE = false;
         internal static bool isDestroyingAreas = false;
         internal static bool isDeferredDamage = false;
+
+        // v2.6.24: per-AOE-call cache of "is this prefab spared?" keyed by
+        // ZDO prefab hash. With AOE=100 a single sweep can hit hundreds of
+        // colliders for the same handful of prefabs; without the cache the
+        // multi-candidate name walk runs on each one. Cleared at the top of
+        // each TryAOEDestroy invocation.
+        private static readonly Dictionary<int, bool> _aoeSpareCache = new Dictionary<int, bool>();
+
+        private static bool IsSparedAOECached(GameObject go)
+        {
+            int hash = 0;
+            try
+            {
+                var nv = go.GetComponentInParent<ZNetView>();
+                if (nv != null)
+                {
+                    var zdo = nv.GetZDO();
+                    if (zdo != null) hash = zdo.GetPrefab();
+                }
+            }
+            catch { }
+
+            if (hash != 0 && _aoeSpareCache.TryGetValue(hash, out bool cached))
+                return cached;
+
+            bool spared = ArmageddonTargetFilter.IsSparedByArmageddon(go);
+            if (hash != 0) _aoeSpareCache[hash] = spared;
+            return spared;
+        }
 
         // Throttle: prevent DestroyMineRock5Areas from running multiple times on the same rock
         private static int lastProcessedRockId = 0;
@@ -2969,21 +3038,29 @@ namespace MegaShot
                 // MineRock5/TreeBase/etc. multiple times (they have many colliders)
                 HashSet<int> processedRoots = new HashSet<int>();
 
+                // v2.6.24 perf: cache the spare-check result by ZDO prefab
+                // hash for the duration of this AOE call. With AOE=100 and
+                // a forest full of identical Rock_3 / Bush01 colliders, the
+                // first instance pays the multi-candidate name walk and the
+                // rest hit O(1) cache lookups. Cleared per call so changes
+                // to the allow/block lists between sweeps still take effect.
+                _aoeSpareCache.Clear();
+
                 foreach (var col in nearby)
                 {
                     if (col == null) continue;
                     GameObject go = col.gameObject;
                     if (go == null) continue;
 
-                    // Armageddon target gate: skip ore veins, food sources,
-                    // drake nests, dungeon decor, etc. Characters bypass the
-                    // gate (gate returns false on Characters anyway, but the
-                    // explicit check below also routes friendlies elsewhere).
+                    // Armageddon target gate: skip spared targets. Cached by
+                    // ZDO prefab hash for the duration of this AOE call —
+                    // identical prefabs (every Rock_3 in the sphere) share
+                    // the cached decision. Falls back to per-GO check when
+                    // the prefab hash isn't resolvable.
                     if (isArmageddon
-                        && go.GetComponentInParent<Character>() == null
-                        && ArmageddonTargetFilter.IsSparedByArmageddon(go))
+                        && go.GetComponentInParent<Character>() == null)
                     {
-                        continue;
+                        if (IsSparedAOECached(go)) continue;
                     }
 
                     HitData aoeHit = CreateDestroyHitData(go.transform.position);

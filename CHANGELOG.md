@@ -5,6 +5,19 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.24] - 2026-04-28
+
+### Fixed
+- **Partial-destroy on big rocks** — beam-hit rocks chunked but the rest of the prefab stayed standing. Two issues:
+  - `DestroyRock5` called `DamageArea` for each sub-area but didn't strip the rock's `m_damageModifiers` first. Mistlands MineRock5s with Resistant / Immune flags would shrug off even 999999 damage. Now temporarily zeroes modifiers around the loop, restores them after.
+  - Added a force-destroy cleanup pass after all `DamageArea` invocations: any sub-mesh / area Valheim hides but doesn't despawn gets nuked via `ZNetView.Destroy`. Loot already spawned during the per-area damage so nothing is stolen.
+
+### Changed (perf — re: "make large area deletes more efficient")
+- **AOE spare-check cached by ZDO prefab hash.** For the duration of a single `TryAOEDestroy` call, the spare-by-Armageddon decision is cached per prefab hash. First instance pays the full multi-candidate name walk; the next 200 identical prefabs (Rock_3, Bush01, etc.) hit O(1) lookups. Cleared per call so allow/block list edits between sweeps still take effect. Big speedup for AOE=100 in dense Black Forest / Mistlands.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `DeferredMineRockDestroy.DestroyRock5` strips modifiers around the DamageArea loop and adds a `ForceDestroyObject` cleanup pass. New `_aoeSpareCache` + `IsSparedAOECached` in `DestroyObjectsHelper`; `TryAOEDestroy` clears the cache per call and routes the spare check through it.
+
 ## [2.6.23] - 2026-04-28
 
 ### Fixed
