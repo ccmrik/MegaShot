@@ -1853,27 +1853,24 @@ namespace MegaShot
         // ReleaseFiringAnimation is now a no-op stub kept for call-site
         // compatibility — there's no BOOL to clear.
 
-        // v2.6.40 — raw SetTrigger pulse. Milord's empirical clue: with
-        // FireRate=100 + per-shot SetTrigger, the cast pose holds long enough
-        // between retriggers that the body reads as a continuous Dundr cast
-        // (10 ms restart cadence on a 0.467 s clip = early-frame pose held
-        // permanently). We embrace that for both Normal/Alt (per-shot,
-        // FireRate-gated) and Armageddon (per-frame, ~60-200 Hz). No state
-        // gate, no time throttle — those produced gaps that read as discrete
-        // shots, not a beam. The earlier "lockup at 10 rps Normal/Alt" claim
-        // (v2.6.39 emergency revert) is overridden by Milord's direct test.
-        // If input gates do close, fall back to state-aware retrigger from
-        // ARMAGEDDON_BEAM_PLAN.md.
+        // v2.6.41 — fire BOTH ZSyncAnimation.SetTrigger AND direct
+        // Animator.SetTrigger, force layer 1 weight every call, pull the
+        // animator from ZSyncAnimation.m_animator (the canonical TopAnimator
+        // vanilla uses) instead of GetComponentInChildren which can grab a
+        // wrong child rig. Plus a one-shot animator-state dump on first
+        // pulse (DebugMode only) so we can see what state the animator is
+        // actually in when triggers are firing — v2.6.40 fired 420
+        // SetTriggers with no visible animation, so the diagnostic tells
+        // us whether layer 1 weight is 0, the animator is in a state
+        // without a transition into rapidfire, or some other gate.
+        private static FieldInfo _zanimAnimatorField;
+        private static bool _zanimAnimatorFieldCached = false;
+        private static bool _animDiagDumped = false;
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
             try
             {
-                if (cachedAnimator == null)
-                    cachedAnimator = player.GetComponentInChildren<Animator>();
-                if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
-                    cachedAnimator.speed = 1f;
-
                 if (!_zanimFieldCached)
                 {
                     _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -1883,11 +1880,47 @@ namespace MegaShot
                 var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
                 if (zanim == null) return;
 
-                if (!string.IsNullOrEmpty(attack.m_attackAnimation))
+                if (!_zanimAnimatorFieldCached)
                 {
-                    zanim.SetTrigger(attack.m_attackAnimation);
-                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                        DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
+                    _zanimAnimatorField = typeof(ZSyncAnimation).GetField("m_animator", BindingFlags.NonPublic | BindingFlags.Instance)
+                                       ?? typeof(ZSyncAnimation).GetField("m_animator", BindingFlags.Public | BindingFlags.Instance);
+                    _zanimAnimatorFieldCached = true;
+                }
+                Animator anim = (_zanimAnimatorField != null) ? (_zanimAnimatorField.GetValue(zanim) as Animator) : null;
+                if (anim == null) anim = player.GetComponentInChildren<Animator>();
+                cachedAnimator = anim;
+
+                if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
+                    cachedAnimator.speed = 1f;
+
+                if (cachedAnimator != null && cachedAnimator.layerCount > 1)
+                    cachedAnimator.SetLayerWeight(1, 1f);
+
+                string trig = attack.m_attackAnimation;
+                if (string.IsNullOrEmpty(trig)) return;
+
+                zanim.SetTrigger(trig);
+                if (cachedAnimator != null) cachedAnimator.SetTrigger(trig);
+
+                if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                {
+                    DiagnosticHelper.Log("ANIM: SetTrigger('" + trig + "')");
+                    if (!_animDiagDumped && cachedAnimator != null)
+                    {
+                        _animDiagDumped = true;
+                        try
+                        {
+                            DiagnosticHelper.Log("ANIM-DIAG: animator=" + cachedAnimator.name + " layers=" + cachedAnimator.layerCount);
+                            for (int i = 0; i < cachedAnimator.layerCount; i++)
+                            {
+                                var s = cachedAnimator.GetCurrentAnimatorStateInfo(i);
+                                DiagnosticHelper.Log("ANIM-DIAG: layer=" + i + " weight=" + cachedAnimator.GetLayerWeight(i)
+                                    + " stateHash=" + s.fullPathHash + " shortHash=" + s.shortNameHash
+                                    + " len=" + s.length + " norm=" + s.normalizedTime);
+                            }
+                        }
+                        catch (Exception ex2) { DiagnosticHelper.LogException("MegaShot", ex2); }
+                    }
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }

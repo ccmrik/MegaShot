@@ -6,7 +6,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>disable</Nullable>
     <AssemblyName>MegaShot</AssemblyName>
-    <Version>2.6.40</Version>
+    <Version>2.6.41</Version>
   </PropertyGroup>
 
   <ItemGroup>
