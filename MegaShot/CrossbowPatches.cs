@@ -515,17 +515,9 @@ namespace MegaShot
         // the throttle. Frame-rate independent at a visually smooth cadence.
         private const float BEAM_TICK_RATE = 30f;
 
-        // Cap the animator playback speed for the firing animation. Anything
-        // above ~5× and the player's draw/release pose is too fast to read.
-        // FireRate=100 (e.g. high-rate setups) used to set speed=100 and the
-        // animation became invisible.
-        private const float FIRE_ANIM_MAX_SPEED = 5f;
-        // Armageddon laser uses a slightly lower speed so the looped pose
-        // stays visually steady (no jittery pumping while LMB is held).
-        private const float ARMAGEDDON_ANIM_SPEED = 3f;
-        // Restart-cadence for Armageddon: replay the current state every Nth
-        // frame so the attack pose stays alive without jittering every frame.
-        private const int ARMAGEDDON_ANIM_RESTART_FRAMES = 4;
+        // No animator-speed scaling — vanilla SetTrigger fires the cast at
+        // 1× and the trigger is re-asserted each shot/frame, so high fire
+        // rates loop naturally rather than compressing the clip.
 
         // Beam particles: tiny glowing motes along the beam path so it reads as
         // ionised energy rather than a solid line. World-space sim, short life,
@@ -727,12 +719,13 @@ namespace MegaShot
                 }
                 else
                 {
-                    // Reset animator speed when not firing
+                    // Idle path — defensive: clear any stale animator-speed
+                    // boost left over from previous MegaShot versions.
                     try
                     {
                         if (cachedAnimator == null)
                             cachedAnimator = __instance.GetComponentInChildren<Animator>();
-                        if (cachedAnimator != null && cachedAnimator.speed > 1f)
+                        if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                             cachedAnimator.speed = 1f;
                     }
                     catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
@@ -1221,11 +1214,9 @@ namespace MegaShot
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
-            // 10. Animation — pulse the attack trigger + restart current state.
-            // Animator speed capped at FIRE_ANIM_MAX_SPEED so the visual reads
-            // even at high fire rates (animator.speed = fireRate at 100rps was
-            // 100× — animation completed in 10 ms and was effectively invisible).
-            PulseFiringAnimation(player, attack, Mathf.Min(MegaShotPlugin.GetEffectiveFireRate(), FIRE_ANIM_MAX_SPEED), restartState: true);
+            // 10. Animation — fire Dundr's cast trigger via ZSyncAnimation
+            // (vanilla pipeline). Per-shot retrigger plus natural 1× speed.
+            PulseFiringAnimation(player, attack);
 
             // 11. Adaptive sound system — two tiers based on fire rate:
             //     ≤15 rps: per-shot effects (all 3 Valheim fallback attempts, like vanilla)
@@ -1646,18 +1637,13 @@ namespace MegaShot
                 // sub-area fractures whose drops scatter well past the raw impact.
                 ArmageddonSuppression.MarkBeamActive();
 
-                // Pulse the player's firing animation continuously while LMB is
-                // held so the body holds the draw/release pose like a constant
-                // stream of crossbow fire. Restart the state every Nth frame so
-                // it doesn't stall on the end frame.
+                // Pulse the cast trigger every frame while LMB is held so
+                // the animator keeps transitioning back into Dundr's cast
+                // pose — produces a continuous looped firing animation.
                 try
                 {
                     var atk = weapon?.m_shared?.m_attack;
-                    if (atk != null)
-                    {
-                        bool restart = (Time.frameCount % ARMAGEDDON_ANIM_RESTART_FRAMES) == 0;
-                        PulseFiringAnimation(player, atk, ARMAGEDDON_ANIM_SPEED, restartState: restart);
-                    }
+                    if (atk != null) PulseFiringAnimation(player, atk);
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
@@ -1832,9 +1818,21 @@ namespace MegaShot
 
         // Pulses the player's firing animation. Used by both per-shot fire
         // (each FireBolt call) and the Armageddon laser (each frame the beam
-        // is firing) so the player's body shows the same draw/release pose
+        // is firing) so Dundr's cast pose plays for every shot and streams
         // continuously while LMB is held in laser mode.
-        private static void PulseFiringAnimation(Player player, Attack attack, float speed, bool restartState)
+        //
+        // Critically: only SetTrigger via ZSyncAnimation. Do NOT call
+        // Animator.Play(currentState, 0, 0f) — that resets the current state
+        // each invocation, which cancels the transition that the just-set
+        // trigger was about to fire. Vanilla relies on SetTrigger alone for
+        // the same animation pipeline. And do NOT scale animator.speed —
+        // speed=fireRate (or even ×5) compresses Dundr's ~1 s cast into a
+        // few frames and renders as "no animation".
+        //
+        // For high fire rates the trigger is re-asserted every shot anyway;
+        // the animator transitions back into the cast state on each pulse,
+        // producing a continuous loop without artificial speed-ups.
+        private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
             try
@@ -1844,21 +1842,26 @@ namespace MegaShot
                     zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
                     zanimFieldCached = true;
                 }
+                // Restore animator speed to 1× if a previous build left it
+                // scaled up (some users will be upgrading mid-session).
                 if (cachedAnimator == null)
                     cachedAnimator = player.GetComponentInChildren<Animator>();
-                if (cachedAnimator != null)
-                {
-                    cachedAnimator.speed = Mathf.Max(1f, speed);
-                    if (restartState)
-                    {
-                        AnimatorStateInfo si = cachedAnimator.GetCurrentAnimatorStateInfo(0);
-                        cachedAnimator.Play(si.fullPathHash, 0, 0f);
-                    }
-                }
+                if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
+                    cachedAnimator.speed = 1f;
+
                 if (zanimField != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
                 {
                     var zanim = zanimField.GetValue(player) as ZSyncAnimation;
-                    if (zanim != null) zanim.SetTrigger(attack.m_attackAnimation);
+                    if (zanim != null)
+                    {
+                        zanim.SetTrigger(attack.m_attackAnimation);
+                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                            DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
+                    }
+                }
+                else if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                {
+                    DiagnosticHelper.Log("ANIM: skipped — zanimField=" + (zanimField != null) + " trigger='" + (attack?.m_attackAnimation ?? "<null>") + "'");
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }

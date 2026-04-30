@@ -5,6 +5,21 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.27] - 2026-04-30
+
+### Fixed
+- **Firing animation invisible across all modes (Normal / Alt-fire / Armageddon).** Two compounding bugs in `PulseFiringAnimation`:
+  1. `Animator.Play(currentState, 0, 0f)` was being called immediately after `ZSyncAnimation.SetTrigger(m_attackAnimation)`. Re-entering the current state via `Play` resets the state machine and **cancels the transition the just-set trigger was about to fire**. Vanilla never does this — it relies on `SetTrigger` alone. Removed.
+  2. Animator playback speed was scaled by fire rate (capped at 5× in v2.6.26, was uncapped before). At 5× a 1-second cast played in 200 ms; at the original `fireRate` it was effectively invisible. Now stays at 1× — the trigger re-asserts each shot, so high fire rates loop naturally.
+
+### Notes
+- Per-shot fire (Normal + Alt) calls `PulseFiringAnimation` once per `FireBolt` → Dundr's full cast plays each shot.
+- Armageddon laser pulses the same trigger every frame while LMB is held → the animator keeps transitioning back into Dundr's cast pose, producing a continuous streamed-firing visual.
+- Diagnostic line `ANIM: SetTrigger('<name>')` written to the BepInEx log when MegaShot DebugMode is on, so the actual trigger name from `attack.m_attackAnimation` can be verified at runtime.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `PulseFiringAnimation` simplified to SetTrigger + speed-restore. Removed `FIRE_ANIM_MAX_SPEED` / `ARMAGEDDON_ANIM_SPEED` / `ARMAGEDDON_ANIM_RESTART_FRAMES` constants. Idle path defensively restores `Animator.speed = 1f`.
+
 ## [2.6.26] - 2026-04-30
 
 ### Changed
