@@ -1004,6 +1004,26 @@ namespace MegaShot
                     hitData.m_backstabBonus = -7777f; // sentinel: armageddon — preserved through TryApplyDestroyDamage
             }
 
+            // v2.6.46: Armageddon mode = guaranteed-kill damage on direct hit
+            // AND on AOE splash. Mirrors the old ApplyBeamHit damage payload
+            // (999999 per type) so a single bolt obliterates the target plus
+            // every creature within ArmageddonAoeRadius. PatchCrossbowAOE
+            // copies hit.m_damage onto each splash hit, so just setting the
+            // bolt's damage massively also handles AOE.
+            if (armageddon)
+            {
+                hitData.m_damage.m_damage    = 999999f;
+                hitData.m_damage.m_blunt     = 999999f;
+                hitData.m_damage.m_slash     = 999999f;
+                hitData.m_damage.m_pierce    = 999999f;
+                hitData.m_damage.m_fire      = 999999f;
+                hitData.m_damage.m_frost     = 999999f;
+                hitData.m_damage.m_lightning = 999999f;
+                hitData.m_damage.m_poison    = 999999f;
+                hitData.m_damage.m_spirit    = 999999f;
+                hitData.m_toolTier           = 9999;
+            }
+
             // Stagger / knockback
             float staggerMult = MegaShotPlugin.Stagger.Value;
             try { hitData.m_pushForce = (weapon.m_shared?.m_attackForce ?? 0f) * staggerMult; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
