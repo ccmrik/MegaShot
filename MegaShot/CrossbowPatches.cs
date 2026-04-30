@@ -3269,7 +3269,10 @@ namespace MegaShot
             "grausten",
             "ashlands_stone",
             // ── Tree stumps & fallen logs ──
-            "stub_", "stubbe",
+            // v2.6.49: added "_stub" (matches Beech_Stub / FirTree_Stub /
+            // Pinetree_Stub / Oak_Stub etc — vanilla post-chop stumps)
+            // and "stump" / "_stump" for any modded variants.
+            "stub_", "_stub", "stubbe", "stump", "_stump",
             "_log", "log_", "oldlog", "fallenlog",
             // ── Ashlands fallen branches (drop Ashwood) ──
             "ashlandsbranch",
