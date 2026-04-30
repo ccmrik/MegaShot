@@ -220,11 +220,18 @@ namespace MegaShot
                 try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
                 try { shared.m_secondaryAttack.m_requiresReload = false; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
-                // v2.6.33 overrode m_attackAnimation to "staff_rapidfire" — that
-                // setup made the game unplayable for Milord (couldn't interact,
-                // couldn't switch weapons). Reverted in v2.6.34 to keep Dundr's
-                // original value untouched. We'll find a safer path to drive the
-                // firing animation in a future iteration.
+                // Override the cast trigger to `staff_rapidfire` (no-charge
+                // rapid-fire variant from the v2.6.31 ANIM-DIAG dump). Dundr
+                // ships with `staff_lightningshot` which is gated on the
+                // `staff_charging` BOOL — wrong for our use case. v2.6.33
+                // confirmed the rapid-fire trigger plays correctly per shot.
+                // Re-introduced in v2.6.35 alongside the Armageddon throttle.
+                try
+                {
+                    shared.m_attack.m_attackAnimation = "staff_rapidfire";
+                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> staff_rapidfire");
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
                 // Base damage (level 1) + linear per-level increment for native tooltip support
                 // Dundr native type is lightning; our postfix overrides with split values

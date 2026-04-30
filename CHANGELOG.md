@@ -5,6 +5,26 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.35] - 2026-04-30
+
+### Added
+- **Self-tuning Armageddon body-animation throttle.** v2.6.33's per-frame trigger pulse locked the animator in the staff_rapidfire state — vanilla input gating saw a permanent attack state and blocked E / weapon-switch until reload. Restored in v2.6.35 with the throttle interval measured at runtime: after the first SetTrigger, `GetCurrentAnimatorStateInfo` reads the rapidfire clip's actual length, and the throttle interval is set to `clip_length + 30 ms buffer`. The animation always finishes and gives the animator one frame to exit before the next pulse, so input always has a window. Falls back to 100 ms (Normal/Alt-safe cadence) until the first measurement succeeds. Clamped to [80 ms, 500 ms].
+
+### Restored
+- `MegaShot/MegaShotItem.cs` — `m_attack.m_attackAnimation = "staff_rapidfire"` override (re-introduced from v2.6.33; proven safe at fire-rate cadence).
+- `MegaShot/CrossbowPatches.cs` — `PulseFiringAnimation` does `ZSyncAnimation.SetTrigger(m_attackAnimation)` again, plus a one-time runtime measurement of the rapidfire clip length on first pulse.
+
+### Behaviour
+- Normal/Alt fire: cast plays once per shot at the configured fire rate (matches v2.6.33's working behaviour).
+- Armageddon: cast trigger pulses at `clip_length + 30 ms` while LMB held → continuous chained casts → input always has a per-cycle window so E / weapon-switch keep working.
+- DebugMode logs `ANIM: measured staff_rapidfire clip length = X.XXXs on layer N` once when the runtime measurement succeeds.
+
+## [2.6.34] - 2026-04-30 — EMERGENCY REVERT
+
+### Reverted
+- v2.6.33 left Milord unable to interact with anything or switch weapons (game unplayable). All animation-driving code was stripped back to a no-op stub. `m_attackAnimation` override removed, `PulseFiringAnimation` reduced to defensive `Animator.speed = 1` reset only.
+- Trade-off: zero firing animation across all modes. Restored playability while we figured out the right approach (now done in v2.6.35).
+
 ## [2.6.33] - 2026-04-30
 
 ### Fixed

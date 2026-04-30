@@ -536,12 +536,8 @@ namespace MegaShot
         // 1× and the trigger is re-asserted each shot/frame, so high fire
         // rates loop naturally rather than compressing the clip.
 
-        // Throttle the Armageddon body-animation pulse so the staff_rapidfire
-        // clip has time to play between retriggers. SetTrigger every frame
-        // (60+ Hz) restarts the clip from frame 0 each time → never visible.
-        // 6 Hz pulse gives ~165 ms per cycle which is roughly the rapidfire
-        // clip's natural duration → back-to-back casts read as a stream.
-        private const float ARMAGEDDON_ANIM_INTERVAL = 1f / 6f;
+        // Last time we pulsed the Armageddon cast trigger (for the self-
+        // tuning throttle in UpdateArmageddonBeam → GetArmageddonAnimInterval).
         private static float _lastArmageddonAnimPulse = -999f;
 
         // Beam particles: tiny glowing motes along the beam path so it reads as
@@ -1668,18 +1664,22 @@ namespace MegaShot
                 // sub-area fractures whose drops scatter well past the raw impact.
                 ArmageddonSuppression.MarkBeamActive();
 
-                // Pulse the cast trigger at a throttled rate while LMB is
-                // held. Hitting SetTrigger every frame (60+ Hz) restarts
-                // staff_rapidfire from frame 0 each time so the clip never
-                // visibly plays — same trap that bit Normal/Alt before we
-                // realised vanilla rate-limit naturally throttles per shot.
-                // ARMAGEDDON_ANIM_INTERVAL gives the clip time to play
-                // through between retriggers, producing back-to-back casts
-                // that read as a continuous firing pose.
+                // Pulse the cast trigger at a self-tuning throttle while LMB
+                // is held. Per-frame triggering (60+ Hz) was what locked the
+                // animator in v2.6.33 — clips never finished before being
+                // restarted, vanilla input gating saw a permanent attack
+                // state, E and weapon-switch broke until a reload. Now we
+                // pulse at `clip_length + 30 ms` (measured at runtime via
+                // GetCurrentAnimatorStateInfo on the staff_rapidfire state).
+                // The animation always finishes and gives the animator one
+                // frame to exit before the next pulse, so input always has
+                // a window. Falls back to 100 ms (Normal/Alt-safe) until
+                // the first measurement succeeds.
                 try
                 {
                     var atk = weapon?.m_shared?.m_attack;
-                    if (atk != null && Time.time - _lastArmageddonAnimPulse >= ARMAGEDDON_ANIM_INTERVAL)
+                    float animInterval = GetArmageddonAnimInterval();
+                    if (atk != null && Time.time - _lastArmageddonAnimPulse >= animInterval)
                     {
                         PulseFiringAnimation(player, atk);
                         _lastArmageddonAnimPulse = Time.time;
@@ -1912,23 +1912,70 @@ namespace MegaShot
         //
         // ReleaseFiringAnimation is now a no-op stub kept for call-site
         // compatibility — there's no BOOL to clear.
-        // v2.6.34: NO-OP. Driving the firing animation manually — even via
-        // plain ZSyncAnimation.SetTrigger on the cast clip — broke
-        // interaction and weapon-switching for Milord (game unplayable).
-        // The exact failure mode wasn't pinned down before reverting; the
-        // priority was restoring playability. Animation work parked here
-        // pending a safer approach in a future iteration.
+        // Cached state-hash for `staff_rapidfire`, plus the runtime-measured
+        // clip length. The animator dump in v2.6.31 showed staff_rapidfire
+        // is the correct rapid-fire cast trigger; v2.6.33 confirmed it plays
+        // correctly per shot for Normal/Alt fire. v2.6.35 measures the clip
+        // length at runtime so the Armageddon throttle can self-tune to a
+        // safe rate (clip + small buffer) without guessing.
+        private static int _rapidfireStateHash = 0;
+        private static float _rapidfireClipLength = 0f; // 0 until measured
+        private static bool _rapidfireClipMeasured = false;
+
+        private static void TryMeasureRapidfireClip()
+        {
+            if (_rapidfireClipMeasured) return;
+            if (cachedAnimator == null) return;
+            if (_rapidfireStateHash == 0)
+                _rapidfireStateHash = Animator.StringToHash("staff_rapidfire");
+            try
+            {
+                for (int layer = 0; layer < cachedAnimator.layerCount; layer++)
+                {
+                    var info = cachedAnimator.GetCurrentAnimatorStateInfo(layer);
+                    if (info.shortNameHash == _rapidfireStateHash || info.fullPathHash == _rapidfireStateHash)
+                    {
+                        _rapidfireClipLength = info.length;
+                        _rapidfireClipMeasured = true;
+                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                            DiagnosticHelper.Log("ANIM: measured staff_rapidfire clip length = " + info.length + "s on layer " + layer);
+                        return;
+                    }
+                }
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
-            // Defensive: only restore animator speed if it was scaled up
-            // by a previous build the user is upgrading from. Don't touch
-            // any animator parameter, BOOL, trigger, or state.
+            if (player == null || attack == null) return;
             try
             {
                 if (cachedAnimator == null)
-                    cachedAnimator = player?.GetComponentInChildren<Animator>();
+                    cachedAnimator = player.GetComponentInChildren<Animator>();
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
+
+                // Try to measure clip length when the animator is currently in
+                // the rapid-fire state (i.e. between this trigger and the next
+                // pulse). Cheap if already measured.
+                TryMeasureRapidfireClip();
+
+                if (!_zanimFieldCached)
+                {
+                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
+                    _zanimFieldCached = true;
+                }
+                if (_zanimField == null) return;
+                var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
+                if (zanim == null) return;
+
+                if (!string.IsNullOrEmpty(attack.m_attackAnimation))
+                {
+                    zanim.SetTrigger(attack.m_attackAnimation);
+                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                        DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
+                }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
@@ -1936,6 +1983,19 @@ namespace MegaShot
         // Stub — kept for call-site compatibility. v2.6.32's staff_charging
         // BOOL was a mistake; there's nothing to release now.
         private static void ReleaseFiringAnimation(Player player) { }
+
+        // Self-tuning throttle interval for Armageddon's body-animation pulse.
+        // Returns clip-length + 30 ms buffer once measured; falls back to a
+        // safe 100 ms (matches Normal/Alt FireRate cadence) until the runtime
+        // measurement succeeds. Clamped to [80 ms, 500 ms] so we can never
+        // pulse faster than Normal/Alt's proven-safe rate or so slow that
+        // the cast looks one-shot.
+        private static float GetArmageddonAnimInterval()
+        {
+            if (!_rapidfireClipMeasured) return 0.1f;
+            float interval = _rapidfireClipLength + 0.03f;
+            return Mathf.Clamp(interval, 0.08f, 0.5f);
+        }
 
         // Applies a Character-only splash around the impact point when the
         // direct beam hit was a spared (non-character) target. Mirrors the
