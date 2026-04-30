@@ -220,12 +220,26 @@ namespace MegaShot
                 try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
                 try { shared.m_secondaryAttack.m_requiresReload = false; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
-                // v2.6.39: m_attackAnimation override removed. Even paired
-                // with the no-op PulseFiringAnimation stub, leaving Dundr's
-                // staff_rapidfire active here meant any vanilla code path
-                // that calls SetTrigger via this field (Attack.Start, etc.)
-                // could still drive the animator into the locking state.
-                // Belt-and-braces: leave Dundr's original value alone.
+                // v2.6.40: m_attackAnimation override RE-INTRODUCED.
+                // Dundr ships with `staff_lightningshot` which is gated on
+                // the `staff_charging` BOOL — wrong for our rapid-fire use
+                // case (forces the long arm-pull DRAW pose). The no-charge
+                // rapid-fire variant `staff_rapidfire` (from v2.6.31's
+                // ANIM-DIAG dump) is the correct trigger.
+                //
+                // Milord's empirical clue (2026-04-30): with FireRate=100 in
+                // Normal mode + this override + a SetTrigger-each-shot pulse,
+                // the visual reads as a constant beam because the 0.467 s
+                // clip is restarted every 10 ms and the cast pose stays
+                // permanently visible. We use that on purpose for Armageddon
+                // (per-frame spam ≈ 60-200 Hz depending on FPS) and accept
+                // the same pattern for Normal/Alt gated by FireRate.
+                try
+                {
+                    shared.m_attack.m_attackAnimation = "staff_rapidfire";
+                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> staff_rapidfire");
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
                 // Base damage (level 1) + linear per-level increment for native tooltip support
                 // Dundr native type is lightning; our postfix overrides with split values

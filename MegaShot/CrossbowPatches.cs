@@ -536,10 +536,6 @@ namespace MegaShot
         // 1× and the trigger is re-asserted each shot/frame, so high fire
         // rates loop naturally rather than compressing the clip.
 
-        // Last time we pulsed the Armageddon cast trigger (for the self-
-        // tuning throttle in UpdateArmageddonBeam → GetArmageddonAnimInterval).
-        private static float _lastArmageddonAnimPulse = -999f;
-
         // Beam particles: tiny glowing motes along the beam path so it reads as
         // ionised energy rather than a solid line. World-space sim, short life,
         // perpendicular drift. Hand-emitted each frame along the ray.
@@ -1602,26 +1598,21 @@ namespace MegaShot
                 // sub-area fractures whose drops scatter well past the raw impact.
                 ArmageddonSuppression.MarkBeamActive();
 
-                // Pulse the cast trigger at a self-tuning throttle while LMB
-                // is held. Per-frame triggering (60+ Hz) was what locked the
-                // animator in v2.6.33 — clips never finished before being
-                // restarted, vanilla input gating saw a permanent attack
-                // state, E and weapon-switch broke until a reload. Now we
-                // pulse at `clip_length + 30 ms` (measured at runtime via
-                // GetCurrentAnimatorStateInfo on the staff_rapidfire state).
-                // The animation always finishes and gives the animator one
-                // frame to exit before the next pulse, so input always has
-                // a window. Falls back to 100 ms (Normal/Alt-safe) until
-                // the first measurement succeeds.
+                // Pulse the cast trigger every frame while LMB is held.
+                // Milord's clue (FireRate=100 in Normal mode → reads as a
+                // constant beam) shows that retriggering staff_rapidfire
+                // before the 0.467 s clip can play out parks the animator
+                // on early frames of the cast pose, which is exactly the
+                // continuous-cast look we want for Armageddon. So no time
+                // throttle, no state gate — frame-rate spam (60-200 Hz)
+                // IS the visual.
                 //
                 // Critical layer-weight override: `staff_rapidfire` plays on
                 // animator layer 1 (upper-body overlay). Vanilla drops that
-                // layer's weight to 0 while sprinting — and `ArmageddonKey`
-                // defaults to LeftShift which IS Valheim's sprint key. So
-                // without forcing the layer weight back to 1, the cast
-                // animation triggers correctly but is invisible. Force it
-                // every frame while LMB is held so our overlay shows on top
-                // of whatever full-body pose vanilla is running.
+                // layer's weight to 0 while sprinting. `ArmageddonKey`
+                // defaults to LeftCtrl (crouch) which doesn't conflict, but
+                // a user who rebinds to a sprint-conflicting key still gets
+                // the cast. Force it every frame.
                 try
                 {
                     if (cachedAnimator != null && cachedAnimator.layerCount > 1)
@@ -1632,12 +1623,7 @@ namespace MegaShot
                 try
                 {
                     var atk = weapon?.m_shared?.m_attack;
-                    float animInterval = GetArmageddonAnimInterval();
-                    if (atk != null && Time.time - _lastArmageddonAnimPulse >= animInterval)
-                    {
-                        PulseFiringAnimation(player, atk);
-                        _lastArmageddonAnimPulse = Time.time;
-                    }
+                    if (atk != null) PulseFiringAnimation(player, atk);
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
@@ -1866,58 +1852,43 @@ namespace MegaShot
         //
         // ReleaseFiringAnimation is now a no-op stub kept for call-site
         // compatibility — there's no BOOL to clear.
-        // Cached state-hash for `staff_rapidfire`, plus the runtime-measured
-        // clip length. The animator dump in v2.6.31 showed staff_rapidfire
-        // is the correct rapid-fire cast trigger; v2.6.33 confirmed it plays
-        // correctly per shot for Normal/Alt fire. v2.6.35 measures the clip
-        // length at runtime so the Armageddon throttle can self-tune to a
-        // safe rate (clip + small buffer) without guessing.
-        private static int _rapidfireStateHash = 0;
-        private static float _rapidfireClipLength = 0f; // 0 until measured
-        private static bool _rapidfireClipMeasured = false;
 
-        private static void TryMeasureRapidfireClip()
-        {
-            if (_rapidfireClipMeasured) return;
-            if (cachedAnimator == null) return;
-            if (_rapidfireStateHash == 0)
-                _rapidfireStateHash = Animator.StringToHash("staff_rapidfire");
-            try
-            {
-                for (int layer = 0; layer < cachedAnimator.layerCount; layer++)
-                {
-                    var info = cachedAnimator.GetCurrentAnimatorStateInfo(layer);
-                    if (info.shortNameHash == _rapidfireStateHash || info.fullPathHash == _rapidfireStateHash)
-                    {
-                        _rapidfireClipLength = info.length;
-                        _rapidfireClipMeasured = true;
-                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                            DiagnosticHelper.Log("ANIM: measured staff_rapidfire clip length = " + info.length + "s on layer " + layer);
-                        return;
-                    }
-                }
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
-
-        // EMERGENCY STUB v2.6.39 — animation pulse is a no-op again.
-        // Even at 10 rps Normal/Alt fire rate the trigger restarts the
-        // 0.467 s rapid-fire clip before it completes, leaving the animator
-        // permanently in attack state and locking input. The throttle for
-        // Armageddon worked but Normal/Alt's per-shot pulse was the new
-        // lockup vector. Until we rewrite this state-aware (only retrigger
-        // when the animator has actually exited the rapid-fire state), it's
-        // safer to ship zero animation than to ship a lockup.
+        // v2.6.40 — raw SetTrigger pulse. Milord's empirical clue: with
+        // FireRate=100 + per-shot SetTrigger, the cast pose holds long enough
+        // between retriggers that the body reads as a continuous Dundr cast
+        // (10 ms restart cadence on a 0.467 s clip = early-frame pose held
+        // permanently). We embrace that for both Normal/Alt (per-shot,
+        // FireRate-gated) and Armageddon (per-frame, ~60-200 Hz). No state
+        // gate, no time throttle — those produced gaps that read as discrete
+        // shots, not a beam. The earlier "lockup at 10 rps Normal/Alt" claim
+        // (v2.6.39 emergency revert) is overridden by Milord's direct test.
+        // If input gates do close, fall back to state-aware retrigger from
+        // ARMAGEDDON_BEAM_PLAN.md.
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
-            // Defensive only: clear stale animator-speed scaling left by
-            // older builds. Touch nothing else.
+            if (player == null || attack == null) return;
             try
             {
                 if (cachedAnimator == null)
-                    cachedAnimator = player?.GetComponentInChildren<Animator>();
+                    cachedAnimator = player.GetComponentInChildren<Animator>();
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
+
+                if (!_zanimFieldCached)
+                {
+                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
+                    _zanimFieldCached = true;
+                }
+                if (_zanimField == null) return;
+                var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
+                if (zanim == null) return;
+
+                if (!string.IsNullOrEmpty(attack.m_attackAnimation))
+                {
+                    zanim.SetTrigger(attack.m_attackAnimation);
+                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                        DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
+                }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
@@ -1925,19 +1896,6 @@ namespace MegaShot
         // Stub — kept for call-site compatibility. v2.6.32's staff_charging
         // BOOL was a mistake; there's nothing to release now.
         private static void ReleaseFiringAnimation(Player player) { }
-
-        // Self-tuning throttle interval for Armageddon's body-animation pulse.
-        // Returns clip-length + 30 ms buffer once measured; falls back to a
-        // safe 100 ms (matches Normal/Alt FireRate cadence) until the runtime
-        // measurement succeeds. Clamped to [80 ms, 500 ms] so we can never
-        // pulse faster than Normal/Alt's proven-safe rate or so slow that
-        // the cast looks one-shot.
-        private static float GetArmageddonAnimInterval()
-        {
-            if (!_rapidfireClipMeasured) return 0.1f;
-            float interval = _rapidfireClipLength + 0.03f;
-            return Mathf.Clamp(interval, 0.08f, 0.5f);
-        }
 
         // Applies a Character-only splash around the impact point when the
         // direct beam hit was a spared (non-character) target. Mirrors the
