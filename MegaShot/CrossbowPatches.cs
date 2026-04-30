@@ -642,6 +642,7 @@ namespace MegaShot
                 cachedFireClip = null;
                 StopArmageddonLaser();
                 StopArmageddonBeam();
+                ReleaseFiringAnimation(__instance);
                 return;
             }
 
@@ -666,6 +667,7 @@ namespace MegaShot
                 CrossbowHUD.showScope = false;
                 StopArmageddonLaser();
                 StopArmageddonBeam();
+                ReleaseFiringAnimation(__instance);
                 try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 return;
             }
@@ -737,7 +739,9 @@ namespace MegaShot
                 else
                 {
                     // Idle path — defensive: clear any stale animator-speed
-                    // boost left over from previous MegaShot versions.
+                    // boost left over from previous MegaShot versions, and
+                    // release the staff_charging BOOL so the player returns
+                    // to neutral pose when LMB is released.
                     try
                     {
                         if (cachedAnimator == null)
@@ -746,6 +750,7 @@ namespace MegaShot
                             cachedAnimator.speed = 1f;
                     }
                     catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                    ReleaseFiringAnimation(__instance);
                 }
             }
 
@@ -1559,6 +1564,7 @@ namespace MegaShot
                 if (!firing)
                 {
                     StopArmageddonBeam();
+                    ReleaseFiringAnimation(player);
                     return;
                 }
 
@@ -1873,24 +1879,37 @@ namespace MegaShot
         internal static bool _suppressVanillaProjectile = false; // unused
         private static FieldInfo _zanimField;
         private static bool _zanimFieldCached = false;
-        private static bool _animatorDiagDumped = false;
 
-        private static void DumpAnimatorOnce(Animator animator)
+        // Animator parameter names — confirmed via the v2.6.31 ANIM-DIAG dump.
+        // The `staff_lightningshot` trigger transition is gated on
+        // `staff_charging == true`. Without that BOOL set, the trigger fires
+        // but the animator silently consumes it without taking the transition.
+        // That's why every prior version's SetTrigger calls produced no
+        // visible animation. Setting the BOOL alongside the trigger makes
+        // the cast animation actually play.
+        private const string PARAM_STAFF_CHARGING = "staff_charging";
+
+        // True while we want the cast animation pinned ON. Set when firing
+        // begins, cleared in the idle/non-firing path so the animator
+        // returns to neutral once LMB is released.
+        private static bool _staffChargingHeld = false;
+
+        private static void SetStaffCharging(Player player, bool charging)
         {
-            if (_animatorDiagDumped) return;
-            if (animator == null) return;
-            if (MegaShotPlugin.DebugMode == null || !MegaShotPlugin.DebugMode.Value) return;
             try
             {
-                _animatorDiagDumped = true;
-                DiagnosticHelper.Log("ANIM-DIAG: layerCount=" + animator.layerCount + " paramCount=" + animator.parameters.Length);
-                foreach (var p in animator.parameters)
-                    DiagnosticHelper.Log("ANIM-DIAG: param " + p.name + " (" + p.type + ") hash=" + p.nameHash);
-                for (int layer = 0; layer < animator.layerCount; layer++)
+                if (cachedAnimator != null) cachedAnimator.SetBool(PARAM_STAFF_CHARGING, charging);
+                if (!_zanimFieldCached)
                 {
-                    var info = animator.GetCurrentAnimatorStateInfo(layer);
-                    DiagnosticHelper.Log("ANIM-DIAG: layer" + layer + " name='" + animator.GetLayerName(layer) + "' currentStateHash=" + info.fullPathHash + " shortHash=" + info.shortNameHash + " length=" + info.length + " normalizedTime=" + info.normalizedTime);
+                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
+                    _zanimFieldCached = true;
                 }
+                if (_zanimField != null)
+                {
+                    var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
+                    if (zanim != null) zanim.SetBool(PARAM_STAFF_CHARGING, charging);
+                }
+                _staffChargingHeld = charging;
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
@@ -1905,18 +1924,50 @@ namespace MegaShot
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
 
-                if (!_animatorDiagDumped) DumpAnimatorOnce(cachedAnimator);
-
                 if (!_zanimFieldCached)
                 {
                     _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
                     _zanimFieldCached = true;
                 }
-                if (_zanimField != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
+                ZSyncAnimation zanim = (_zanimField != null) ? (_zanimField.GetValue(player) as ZSyncAnimation) : null;
+
+                // Pin staff_charging ON. The cast trigger is gated on this BOOL —
+                // without it, SetTrigger is silently consumed without firing the
+                // transition into the cast state.
+                if (!_staffChargingHeld)
+                {
+                    if (cachedAnimator != null) cachedAnimator.SetBool(PARAM_STAFF_CHARGING, true);
+                    if (zanim != null) zanim.SetBool(PARAM_STAFF_CHARGING, true);
+                    _staffChargingHeld = true;
+                }
+
+                // Fire the cast trigger (default: staff_lightningshot — Dundr's clip).
+                if (zanim != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
+                    zanim.SetTrigger(attack.m_attackAnimation);
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        // Called from the idle path when LMB is released / Armageddon stops /
+        // weapon swapped away — clears staff_charging so the animator returns
+        // to neutral cleanly instead of being stuck in the charging pose.
+        private static void ReleaseFiringAnimation(Player player)
+        {
+            if (!_staffChargingHeld) return;
+            try
+            {
+                if (cachedAnimator != null) cachedAnimator.SetBool(PARAM_STAFF_CHARGING, false);
+                if (!_zanimFieldCached)
+                {
+                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
+                    _zanimFieldCached = true;
+                }
+                if (_zanimField != null && player != null)
                 {
                     var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
-                    if (zanim != null) zanim.SetTrigger(attack.m_attackAnimation);
+                    if (zanim != null) zanim.SetBool(PARAM_STAFF_CHARGING, false);
                 }
+                _staffChargingHeld = false;
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }

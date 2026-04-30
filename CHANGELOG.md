@@ -5,6 +5,22 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.32] - 2026-04-30
+
+### Fixed
+- **Firing animation now actually plays.** The v2.6.31 `ANIM-DIAG` dump revealed the missing piece: the `staff_lightningshot` trigger transition is gated on the `staff_charging` (Bool) animator parameter. Without that BOOL set to true, every prior version's `SetTrigger` was being silently consumed without firing the transition into the cast state. Vanilla Dundr does it as: `SetBool(staff_charging, true)` → `SetTrigger(staff_lightningshot)` → cast plays → `SetBool(staff_charging, false)`. We were only doing step 2.
+
+### Added
+- `SetStaffCharging` / `_staffChargingHeld` state. `PulseFiringAnimation` flips `staff_charging` ON before firing the cast trigger; `ReleaseFiringAnimation` clears it when fire input stops, weapon swaps, UI opens, or Armageddon mode releases LMB. The animator returns cleanly to neutral instead of getting stuck in the charge pose.
+
+### Notes
+- **Normal / Alt fire**: `staff_charging` pinned ON while firing → cast trigger lands → animation plays. Cleared in the idle path.
+- **Armageddon**: `staff_charging` pinned ON while LMB held → cast trigger pulses every frame → continuous looped cast pose alongside the laser visual. `ReleaseFiringAnimation` invoked when LMB releases or the beam is stopped.
+- Velocity-affecting-effect feedback (Milord noted high velocity skews the visual cast timing) is on the follow-up list — addressed once the `staff_charging` fix is confirmed working.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `PulseFiringAnimation` now sets `staff_charging` BOOL via Animator + ZSyncAnimation. New `ReleaseFiringAnimation` invoked from idle / weapon-swap / UI-open / Armageddon-stop paths. Removed the dead vanilla-StartAttack scaffolding (kept the unused `_vanillaStartAttackAllowed` flag so `PatchBlockVanillaAttack`'s defensive check still compiles).
+
 ## [2.6.31] - 2026-04-30
 
 ### Fixed
