@@ -1731,6 +1731,13 @@ namespace MegaShot
                 {
                     // (No per-tick log — IsSparedByArmageddon already
                     // logs unique unmatched targets via LogUnmatchedOnce.)
+                    // Still apply a Character-only splash so creatures hiding
+                    // behind dungeon walls / decor / spared rocks still take
+                    // damage. Without this, a beam aimed at a draugr standing
+                    // behind a crypt wall hits the wall, spares it, returns,
+                    // and the draugr never gets touched.
+                    try { ApplyArmageddonCharacterSplash(player, hitPoint); }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     return;
                 }
 
@@ -1824,6 +1831,51 @@ namespace MegaShot
                 cachedAudioSource.spatialBlend = 1f;
                 cachedAudioSource.maxDistance = 50f;
                 cachedAudioSource.rolloffMode = AudioRolloffMode.Linear;
+            }
+        }
+
+        // Applies a Character-only splash around the impact point when the
+        // direct beam hit was a spared (non-character) target. Mirrors the
+        // damage payload built in ApplyBeamHit and uses ArmageddonAoeRadius.
+        // Drops flow through vanilla CharacterDrop.OnDeath — no extra wiring.
+        private static void ApplyArmageddonCharacterSplash(Player player, Vector3 hitPoint)
+        {
+            if (player == null) return;
+            float radius = MegaShotPlugin.ArmageddonAoeRadius.Value;
+            if (radius <= 0f) return;
+            int layerMask = LayerMask.GetMask("character", "character_net", "character_ghost", "character_noenv");
+            Collider[] nearby = Physics.OverlapSphere(hitPoint, radius, layerMask);
+            if (nearby == null || nearby.Length == 0) return;
+            HashSet<int> alreadyHit = new HashSet<int>();
+            alreadyHit.Add(player.GetInstanceID());
+            for (int i = 0; i < nearby.Length; i++)
+            {
+                var col = nearby[i];
+                if (col == null) continue;
+                var character = col.GetComponentInParent<Character>();
+                if (character == null) continue;
+                if (!alreadyHit.Add(character.GetInstanceID())) continue;
+                if (ArmageddonSuppression.IsFriendlyToBeam(character, player)) continue;
+
+                HitData splash = new HitData();
+                splash.m_damage.m_damage    = 999999f;
+                splash.m_damage.m_blunt     = 999999f;
+                splash.m_damage.m_slash     = 999999f;
+                splash.m_damage.m_pierce    = 999999f;
+                splash.m_damage.m_chop      = 999998f;
+                splash.m_damage.m_pickaxe   = 999998f;
+                splash.m_damage.m_fire      = 999999f;
+                splash.m_damage.m_frost     = 999999f;
+                splash.m_damage.m_lightning = 999999f;
+                splash.m_damage.m_poison    = 999999f;
+                splash.m_damage.m_spirit    = 999999f;
+                splash.m_toolTier = 9999;
+                splash.m_backstabBonus = -7777f; // armageddon sentinel
+                splash.m_skill = Skills.SkillType.None; // prevents PatchCrossbowAOE re-trigger
+                splash.m_point = character.GetCenterPoint();
+                splash.m_dir = (character.transform.position - hitPoint).normalized;
+                try { splash.SetAttacker(player); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                try { character.Damage(splash); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
             }
         }
 
@@ -2875,6 +2927,36 @@ namespace MegaShot
             // spawn logs, split into pieces, and drop wood properly
             if (target is TreeBase || target is TreeLog) return;
 
+            // Destructibles (MuddyScrapPile, beehives, guck sacks, plain crates,
+            // etc.) MUST go through Destructible.Destroy() so the event chain
+            // fires: m_destroyedEffect, m_dropWhenDestroyed, m_spawnWhenDestroyed,
+            // m_onDestroyed → DropOnDestroyed.OnDestroyed (the iron/leather/withered-
+            // bone drops). Bare nview.Destroy() rips the GameObject out without
+            // firing any of those, so dungeon scrap piles vanish without loot.
+            if (target is Destructible dest)
+            {
+                try
+                {
+                    var nv = dest.GetComponent<ZNetView>();
+                    if (nv == null) nv = dest.GetComponentInParent<ZNetView>();
+                    if (nv != null && nv.IsValid())
+                    {
+                        if (!nv.IsOwner()) nv.ClaimOwnership();
+                        if (nv.IsOwner())
+                        {
+                            // Drive health to 0 so any Destructible.Destroy guard
+                            // that re-checks the field passes cleanly.
+                            try { dest.m_health = 0f; }
+                            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                            dest.Destroy();
+                            return;
+                        }
+                    }
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                // Fall through to the generic ZNetView destroy as last resort.
+            }
+
             try
             {
                 // Try setting health fields to 0 via reflection (many types use m_health)
@@ -3385,6 +3467,22 @@ namespace MegaShot
                     savedImpactPoint = hit.m_point;
                     savedModifiers = __instance.m_damages;
                     __instance.m_damages = new HitData.DamageModifiers();
+
+                    // Claim ZNetView ownership so vanilla Damage runs locally and the
+                    // full destruction path fires (m_destroyedEffect, m_dropWhenDestroyed,
+                    // m_spawnWhenDestroyed, m_onDestroyed → DropOnDestroyed). Without
+                    // this, dungeon-resident destructibles like MuddyScrapPile see the
+                    // damage RPC routed to the remote owner — locally Damage is a no-op,
+                    // and our Postfix's ForceDestroyIfNeeded then nukes the GameObject
+                    // via nview.Destroy() without ever firing DropOnDestroyed.
+                    try
+                    {
+                        var nv = __instance.GetComponent<ZNetView>();
+                        if (nv == null) nv = __instance.GetComponentInParent<ZNetView>();
+                        if (nv != null && nv.IsValid() && !nv.IsOwner())
+                            nv.ClaimOwnership();
+                    }
+                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
                     // Diagnostic: log Destructible hit info to file
                     try

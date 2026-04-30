@@ -5,6 +5,16 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.25] - 2026-04-30
+
+### Fixed
+- **Alt-fire on Muddy Scrap Pile (and any `Destructible` with a `DropOnDestroyed`) destroyed without dropping loot.** `ForceDestroyIfNeeded` was calling `nview.Destroy()` directly, which removes the GameObject from the scene without ever firing `Destructible.m_destroyedEffect`, `m_dropWhenDestroyed`, `m_spawnWhenDestroyed`, or `m_onDestroyed` (the event `DropOnDestroyed` listens to for iron scrap, leather scraps, withered bones, etc.). Now special-cases `Destructible`: claim ownership, drive `m_health` to 0, and call vanilla `Destructible.Destroy()` so the full event chain fires and drops spawn.
+- **Destructible damage RPC race in dungeons.** `Destructible.Damage` is a no-op locally when the player isn't the ZNetView owner (sends an RPC to the remote owner). Our destroy-tagged Postfix then nuked the GameObject before the RPC's drop chain could run. The Prefix now claims ownership BEFORE vanilla Damage runs, so the local client executes the full destruction path.
+- **Armageddon beam sparing creatures hidden behind dungeon walls.** When the beam's first hit was a "crypt" / "burialchamber" / decor target on the spare list, we returned early and no AOE splash ran — so a draugr or skeleton standing behind a crypt wall took zero damage. Spare branch now applies a Character-only splash (`ArmageddonAoeRadius`, character layers) around the impact point so creatures inside dungeons still die and drop loot via vanilla `CharacterDrop.OnDeath`.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `DestroyObjectsHelper.ForceDestroyIfNeeded` Destructible branch calls `Destructible.Destroy()`. `PatchDestroyDestructible.Prefix` claims ZNetView ownership when destroy-tagged. New `ApplyArmageddonCharacterSplash` helper invoked from `ApplyBeamHit` spare branch.
+
 ## [2.6.24] - 2026-04-28
 
 ### Fixed
