@@ -220,6 +220,20 @@ namespace MegaShot
                 try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
                 try { shared.m_secondaryAttack.m_requiresReload = false; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
+                // Swap the cast trigger from `staff_lightningshot` (Dundr's
+                // charged-cast variant — gated on `staff_charging` BOOL and
+                // visually preceded by a long arm-draw that reads as a
+                // reload at high fire rate) to `staff_rapidfire` (the
+                // animator's no-charge rapid-fire trigger, exposed via the
+                // v2.6.31 ANIM-DIAG dump). Same animator, no BOOL gate, no
+                // draw phase — just a quick cast pose per trigger pulse.
+                try
+                {
+                    shared.m_attack.m_attackAnimation = "staff_rapidfire";
+                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> staff_rapidfire");
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+
                 // Base damage (level 1) + linear per-level increment for native tooltip support
                 // Dundr native type is lightning; our postfix overrides with split values
                 var baseDmg = new HitData.DamageTypes();

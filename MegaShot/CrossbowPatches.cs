@@ -1880,40 +1880,21 @@ namespace MegaShot
         private static FieldInfo _zanimField;
         private static bool _zanimFieldCached = false;
 
-        // Animator parameter names — confirmed via the v2.6.31 ANIM-DIAG dump.
-        // The `staff_lightningshot` trigger transition is gated on
-        // `staff_charging == true`. Without that BOOL set, the trigger fires
-        // but the animator silently consumes it without taking the transition.
-        // That's why every prior version's SetTrigger calls produced no
-        // visible animation. Setting the BOOL alongside the trigger makes
-        // the cast animation actually play.
-        private const string PARAM_STAFF_CHARGING = "staff_charging";
-
-        // True while we want the cast animation pinned ON. Set when firing
-        // begins, cleared in the idle/non-firing path so the animator
-        // returns to neutral once LMB is released.
-        private static bool _staffChargingHeld = false;
-
-        private static void SetStaffCharging(Player player, bool charging)
-        {
-            try
-            {
-                if (cachedAnimator != null) cachedAnimator.SetBool(PARAM_STAFF_CHARGING, charging);
-                if (!_zanimFieldCached)
-                {
-                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
-                    _zanimFieldCached = true;
-                }
-                if (_zanimField != null)
-                {
-                    var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
-                    if (zanim != null) zanim.SetBool(PARAM_STAFF_CHARGING, charging);
-                }
-                _staffChargingHeld = charging;
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
-
+        // v2.6.32 set `staff_charging` (Bool) thinking it gated the
+        // `staff_lightningshot` trigger. Wrong: `staff_charging=true` puts
+        // the animator in the staff DRAW/CHARGE state — the long arm-pull
+        // pose vanilla Dundr uses on LMB-press, which Milord saw as a
+        // "reload after every shot" because at fire rate the cycle was
+        // staff_charging → tiny fire → release → repeat.
+        //
+        // Proper trigger for rapid-fire-without-charge is `staff_rapidfire`
+        // (also exposed in the v2.6.31 ANIM-DIAG dump). We override the
+        // weapon's `m_attack.m_attackAnimation` to that at prefab build
+        // time, so PulseFiringAnimation's plain SetTrigger fires the
+        // right clip without needing the BOOL gate.
+        //
+        // ReleaseFiringAnimation is now a no-op stub kept for call-site
+        // compatibility — there's no BOOL to clear.
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
@@ -1929,48 +1910,23 @@ namespace MegaShot
                     _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
                     _zanimFieldCached = true;
                 }
-                ZSyncAnimation zanim = (_zanimField != null) ? (_zanimField.GetValue(player) as ZSyncAnimation) : null;
+                if (_zanimField == null) return;
+                var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
+                if (zanim == null) return;
 
-                // Pin staff_charging ON. The cast trigger is gated on this BOOL —
-                // without it, SetTrigger is silently consumed without firing the
-                // transition into the cast state.
-                if (!_staffChargingHeld)
+                if (!string.IsNullOrEmpty(attack.m_attackAnimation))
                 {
-                    if (cachedAnimator != null) cachedAnimator.SetBool(PARAM_STAFF_CHARGING, true);
-                    if (zanim != null) zanim.SetBool(PARAM_STAFF_CHARGING, true);
-                    _staffChargingHeld = true;
-                }
-
-                // Fire the cast trigger (default: staff_lightningshot — Dundr's clip).
-                if (zanim != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
                     zanim.SetTrigger(attack.m_attackAnimation);
+                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                        DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
+                }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
-        // Called from the idle path when LMB is released / Armageddon stops /
-        // weapon swapped away — clears staff_charging so the animator returns
-        // to neutral cleanly instead of being stuck in the charging pose.
-        private static void ReleaseFiringAnimation(Player player)
-        {
-            if (!_staffChargingHeld) return;
-            try
-            {
-                if (cachedAnimator != null) cachedAnimator.SetBool(PARAM_STAFF_CHARGING, false);
-                if (!_zanimFieldCached)
-                {
-                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
-                    _zanimFieldCached = true;
-                }
-                if (_zanimField != null && player != null)
-                {
-                    var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
-                    if (zanim != null) zanim.SetBool(PARAM_STAFF_CHARGING, false);
-                }
-                _staffChargingHeld = false;
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
+        // Stub — kept for call-site compatibility. v2.6.32's staff_charging
+        // BOOL was a mistake; there's nothing to release now.
+        private static void ReleaseFiringAnimation(Player player) { }
 
         // Applies a Character-only splash around the impact point when the
         // direct beam hit was a spared (non-character) target. Mirrors the

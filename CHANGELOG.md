@@ -5,6 +5,26 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.33] - 2026-04-30
+
+### Fixed
+- **v2.6.32 was driving the reload-looking draw animation, not the cast.** Setting `staff_charging=true` puts the animator into Dundr's CHARGE state — the long arm-pull pose vanilla plays on LMB-press, which Milord saw as a "reload after every shot" because at fire rate the cycle was charge → tiny fire → release → repeat.
+- The animator dump from v2.6.31 also exposed **`staff_rapidfire`** (Trigger) — the rapid-fire cast trigger that bypasses the charge phase entirely. Switched the weapon's `m_attack.m_attackAnimation` to that at prefab build time. SetTrigger fires the rapid-fire clip without needing any BOOL gate.
+
+### Changed
+- `MegaShot/MegaShotItem.cs` — `CreatePrefab` overrides `shared.m_attack.m_attackAnimation = "staff_rapidfire"` after the Dundr clone.
+- `PulseFiringAnimation` simplified back to a clean `ZSyncAnimation.SetTrigger(m_attackAnimation)` per shot. No `staff_charging` BOOL pinning. `ReleaseFiringAnimation` reduced to a no-op stub (kept for call-site compat).
+- DebugMode logs `ANIM: SetTrigger('staff_rapidfire')` per pulse so we can confirm at runtime.
+
+### Notes
+- Per-shot Normal/Alt fire: rapid-fire cast plays each shot, no charge windup.
+- Armageddon laser: same trigger pulsed every frame → continuous rapid-fire pose. (v2.6.32 reportedly showed zero change in Armageddon — likely because `staff_charging` was setting a state that clashed with the existing beam visual; with that BOOL gone, the rapid-fire trigger should now drive the body animation alongside the beam.)
+- Velocity-affecting-effect feedback still queued — confirm rapid-fire animation works first.
+
+### Files touched
+- `MegaShot/MegaShotItem.cs` — m_attackAnimation override.
+- `MegaShot/CrossbowPatches.cs` — PulseFiringAnimation simplified, ReleaseFiringAnimation stubbed.
+
 ## [2.6.32] - 2026-04-30
 
 ### Fixed
