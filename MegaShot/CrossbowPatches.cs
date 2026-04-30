@@ -536,6 +536,14 @@ namespace MegaShot
         // 1× and the trigger is re-asserted each shot/frame, so high fire
         // rates loop naturally rather than compressing the clip.
 
+        // Throttle the Armageddon body-animation pulse so the staff_rapidfire
+        // clip has time to play between retriggers. SetTrigger every frame
+        // (60+ Hz) restarts the clip from frame 0 each time → never visible.
+        // 6 Hz pulse gives ~165 ms per cycle which is roughly the rapidfire
+        // clip's natural duration → back-to-back casts read as a stream.
+        private const float ARMAGEDDON_ANIM_INTERVAL = 1f / 6f;
+        private static float _lastArmageddonAnimPulse = -999f;
+
         // Beam particles: tiny glowing motes along the beam path so it reads as
         // ionised energy rather than a solid line. World-space sim, short life,
         // perpendicular drift. Hand-emitted each frame along the ray.
@@ -1660,13 +1668,22 @@ namespace MegaShot
                 // sub-area fractures whose drops scatter well past the raw impact.
                 ArmageddonSuppression.MarkBeamActive();
 
-                // Pulse the cast trigger every frame while LMB is held so
-                // the animator keeps transitioning back into Dundr's cast
-                // pose — produces a continuous looped firing animation.
+                // Pulse the cast trigger at a throttled rate while LMB is
+                // held. Hitting SetTrigger every frame (60+ Hz) restarts
+                // staff_rapidfire from frame 0 each time so the clip never
+                // visibly plays — same trap that bit Normal/Alt before we
+                // realised vanilla rate-limit naturally throttles per shot.
+                // ARMAGEDDON_ANIM_INTERVAL gives the clip time to play
+                // through between retriggers, producing back-to-back casts
+                // that read as a continuous firing pose.
                 try
                 {
                     var atk = weapon?.m_shared?.m_attack;
-                    if (atk != null) PulseFiringAnimation(player, atk);
+                    if (atk != null && Time.time - _lastArmageddonAnimPulse >= ARMAGEDDON_ANIM_INTERVAL)
+                    {
+                        PulseFiringAnimation(player, atk);
+                        _lastArmageddonAnimPulse = Time.time;
+                    }
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
@@ -1895,31 +1912,23 @@ namespace MegaShot
         //
         // ReleaseFiringAnimation is now a no-op stub kept for call-site
         // compatibility — there's no BOOL to clear.
+        // v2.6.34: NO-OP. Driving the firing animation manually — even via
+        // plain ZSyncAnimation.SetTrigger on the cast clip — broke
+        // interaction and weapon-switching for Milord (game unplayable).
+        // The exact failure mode wasn't pinned down before reverting; the
+        // priority was restoring playability. Animation work parked here
+        // pending a safer approach in a future iteration.
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
-            if (player == null || attack == null) return;
+            // Defensive: only restore animator speed if it was scaled up
+            // by a previous build the user is upgrading from. Don't touch
+            // any animator parameter, BOOL, trigger, or state.
             try
             {
                 if (cachedAnimator == null)
-                    cachedAnimator = player.GetComponentInChildren<Animator>();
+                    cachedAnimator = player?.GetComponentInChildren<Animator>();
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
-
-                if (!_zanimFieldCached)
-                {
-                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
-                    _zanimFieldCached = true;
-                }
-                if (_zanimField == null) return;
-                var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
-                if (zanim == null) return;
-
-                if (!string.IsNullOrEmpty(attack.m_attackAnimation))
-                {
-                    zanim.SetTrigger(attack.m_attackAnimation);
-                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                        DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
-                }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
