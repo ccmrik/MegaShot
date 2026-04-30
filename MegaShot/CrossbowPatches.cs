@@ -319,21 +319,12 @@ namespace MegaShot
     // during the StartAttack call window; legitimate vanilla attack triggers
     // (which never reach a crossbow weapon anyway since Block returns false)
     // pass through unaffected.
-    [HarmonyPatch(typeof(Attack), "OnAttackTrigger")]
-    public static class PatchSuppressVanillaProjectile
-    {
-        public static bool Prefix()
-        {
-            // Only suppress when we're inside our induced StartAttack window —
-            // the flag is set by PulseFiringAnimation just before calling
-            // vanilla StartAttack, and cleared right after. Outside that
-            // window the flag is false and vanilla animation events run
-            // normally for everything else.
-            if (!MegaShotPlugin.ModEnabled.Value) return true;
-            if (PatchPlayerUpdate._suppressVanillaProjectile) return false;
-            return true;
-        }
-    }
+    // (PatchSuppressVanillaProjectile removed in v2.6.30 — `m_attackProjectile`
+    // null on the cloned Attack instance already prevents the spawn, and the
+    // OnAttackTrigger Prefix was blocking vanilla's own state cleanup that
+    // resets `m_currentAttack` when the cast finishes. Without that cleanup
+    // our throttle saw "vanilla cast still running" forever and the second
+    // animation never started.)
 
     // Block Eitr drain for MegaShot (Dundr clone normally uses Eitr)
     // Manually patched in Class1.cs (not attribute-based) — safe if UseEitr doesn't exist
@@ -1867,9 +1858,17 @@ namespace MegaShot
         // hasn't been set by us — i.e. the legitimate vanilla path is fine,
         // but our induced StartAttack call won't double-fire a Dundr bolt.
         internal static bool _vanillaStartAttackAllowed = false;
-        internal static bool _suppressVanillaProjectile = false;
+        internal static bool _suppressVanillaProjectile = false; // unused after v2.6.30, kept for compat
+        // Vanilla's natural rate-limit (m_currentAttack) is what runs the cast
+        // animation to completion. Don't clear it forcibly — that restarts
+        // the animation from frame 0 every call and freezes it.
+        //
+        // Safety net: if m_currentAttack hasn't auto-cleared after a generous
+        // timeout (1.5s — Dundr cast is ~1s), nuke it manually so we don't
+        // get stuck if vanilla's cleanup chain is interrupted somehow.
         private static FieldInfo _currentAttackField;
-        private static FieldInfo _previousAttackField;
+        private static float _lastSuccessfulStartAttack = -999f;
+        private const float STARTATTACK_TIMEOUT_SEC = 1.5f;
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
@@ -1883,22 +1882,30 @@ namespace MegaShot
                 if (_currentAttackField == null)
                     _currentAttackField = typeof(Humanoid).GetField("m_currentAttack",
                         BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                if (_previousAttackField == null)
-                    _previousAttackField = typeof(Humanoid).GetField("m_previousAttack",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
 
-                // Clear m_currentAttack so vanilla rate-limit doesn't reject us.
-                try { _currentAttackField?.SetValue(player, null); } catch { }
-                try { _previousAttackField?.SetValue(player, null); } catch { }
+                // Skip if vanilla's previous cast is still running. Vanilla
+                // auto-clears m_currentAttack via the animation event chain
+                // when the cast finishes; our next call accepts at that point.
+                object currentAttack = null;
+                try { currentAttack = _currentAttackField?.GetValue(player); } catch { }
+                if (currentAttack != null)
+                {
+                    // Stuck-attack timeout: force-clear if we've been waiting
+                    // longer than the cast's natural duration with no progress.
+                    if (Time.time - _lastSuccessfulStartAttack > STARTATTACK_TIMEOUT_SEC)
+                    {
+                        try { _currentAttackField?.SetValue(player, null); } catch { }
+                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                            DiagnosticHelper.Log("ANIM: timeout — force-cleared m_currentAttack");
+                    }
+                    else
+                    {
+                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                            DiagnosticHelper.Log("ANIM: skipped — vanilla cast still running");
+                        return;
+                    }
+                }
 
-                // Null the weapon's m_attackProjectile across the StartAttack
-                // call. Vanilla constructs its Attack instance by cloning from
-                // the weapon template — that clone snapshots the projectile
-                // field at construction. With it null at clone time, vanilla's
-                // animation-event fire-projectile callback reads null on the
-                // clone and skips the spawn. We restore the original on the
-                // weapon template right after, so our FireBolt's prefab lookup
-                // (which runs every shot) keeps working for the manual spawn.
                 var weaponAttack = player.GetCurrentWeapon()?.m_shared?.m_attack;
                 GameObject savedProjectile = null;
                 if (weaponAttack != null)
@@ -1908,17 +1915,17 @@ namespace MegaShot
                 }
 
                 _vanillaStartAttackAllowed = true;
-                _suppressVanillaProjectile = true;
+                bool started = false;
                 try
                 {
-                    player.StartAttack(null, false);
+                    started = player.StartAttack(null, false);
+                    if (started) _lastSuccessfulStartAttack = Time.time;
                     if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                        DiagnosticHelper.Log("ANIM: vanilla StartAttack invoked (anim='" + (attack.m_attackAnimation ?? "<null>") + "')");
+                        DiagnosticHelper.Log("ANIM: vanilla StartAttack returned " + started + " (anim='" + (attack.m_attackAnimation ?? "<null>") + "')");
                 }
                 finally
                 {
                     _vanillaStartAttackAllowed = false;
-                    _suppressVanillaProjectile = false;
                     if (weaponAttack != null) weaponAttack.m_attackProjectile = savedProjectile;
                 }
             }

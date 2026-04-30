@@ -5,6 +5,27 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.30] - 2026-04-30
+
+### Fixed
+- **Animations only "kind of working" at long range, completely missing in Armageddon laser.** Same root cause as the v2.6.28 CrossFade-every-frame regression: `PulseFiringAnimation` was clearing `m_currentAttack` / `m_previousAttack` via reflection on every call so vanilla `StartAttack` would always accept. That **restarted the cast animation from frame 0 every call** — at 10 rps the animation never advanced past ~10% (close-range invisible); when shots were spaced out (long range, between bursts) the cast got time to play (visible). At 60 Hz in Armageddon the cast never advanced past frame 0 at all.
+
+### Changed
+- `PulseFiringAnimation` no longer clears `m_currentAttack`. Vanilla's natural rate-limit runs the cast to completion; subsequent calls accept when vanilla auto-clears the field via the cast's animation event chain.
+- Removed `PatchSuppressVanillaProjectile` (the `Attack.OnAttackTrigger` Prefix). It was blocking vanilla's own state cleanup that resets `m_currentAttack` when the cast finishes — so the throttle saw "cast still running" forever and the second cast never started. Setting `m_attackProjectile = null` on the Attack clone (via the weapon template) already prevents the duplicate spawn; OnAttackTrigger now runs to completion and tidies state.
+- Safety net: if `m_currentAttack` hasn't auto-cleared after 1.5 s (Dundr cast is ~1 s), force-clear it. Stops the animation getting permanently stuck if vanilla's cleanup chain is interrupted.
+
+### Notes
+- Per-shot Normal/Alt fire: cast plays naturally at vanilla's pace (~1 s); bolts spawn at the configured fire rate independently.
+- Armageddon laser: one cast cycle every ~1 s while LMB is held → continuous-looking cast stream (the cast animation chains back-to-back).
+- DebugMode logs:
+  - `ANIM: skipped — vanilla cast still running` when the throttle skips a redundant call.
+  - `ANIM: vanilla StartAttack returned True/False` when the call goes through (False = vanilla rejected for another reason — stamina/eitr/loaded — so we know to look there).
+  - `ANIM: timeout — force-cleared m_currentAttack` when the 1.5 s safety net fires.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `PulseFiringAnimation` no longer force-clears `m_currentAttack`. `PatchSuppressVanillaProjectile` removed entirely. Added stuck-attack timeout. Removed unused `_suppressVanillaProjectile` flag references at call sites.
+
 ## [2.6.29] - 2026-04-30
 
 ### Fixed
