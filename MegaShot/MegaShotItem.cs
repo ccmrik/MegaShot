@@ -220,24 +220,32 @@ namespace MegaShot
                 try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
                 try { shared.m_secondaryAttack.m_requiresReload = false; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
-                // v2.6.40: m_attackAnimation override RE-INTRODUCED.
-                // Dundr ships with `staff_lightningshot` which is gated on
-                // the `staff_charging` BOOL — wrong for our rapid-fire use
-                // case (forces the long arm-pull DRAW pose). The no-charge
-                // rapid-fire variant `staff_rapidfire` (from v2.6.31's
-                // ANIM-DIAG dump) is the correct trigger.
-                //
-                // Milord's empirical clue (2026-04-30): with FireRate=100 in
-                // Normal mode + this override + a SetTrigger-each-shot pulse,
-                // the visual reads as a constant beam because the 0.467 s
-                // clip is restarted every 10 ms and the cast pose stays
-                // permanently visible. We use that on purpose for Armageddon
-                // (per-frame spam ≈ 60-200 Hz depending on FPS) and accept
-                // the same pattern for Normal/Alt gated by FireRate.
+                // v2.6.43: m_attackAnimation = "crossbow_fire" (NOT
+                // staff_rapidfire). The v2.6.42 ANIM-DIAG dump revealed the
+                // root cause of v2.6.40-v2.6.42 having no visible animation:
+                //   - layer 0 (Base) was in "Idle Crossbow" because
+                //     m_skillType = Skills.SkillType.Crossbows puts statei=10
+                //     and parks the animator in the crossbow sub-tree
+                //   - layer 1 (upperbody) had clips=[(none)] — no active
+                //     clip — because layer 1 is for the staff sub-tree
+                //     overlay which isn't engaged when we're in crossbow
+                //     stance
+                //   - staff_rapidfire trigger has no transition out of any
+                //     state in the crossbow sub-tree, so the trigger was
+                //     consumed but never transitioned. Worse: vanilla
+                //     input-gating saw a "pending attack trigger" and
+                //     closed input → lockup with no animation.
+                // crossbow_fire has the proper transition arc out of the
+                // crossbow Idle state. Vanilla MegaShot already wields the
+                // weapon as a crossbow visually (because skillType=Crossbows
+                // drives statei=10), so this matches Milord's spec exactly:
+                // "use essentially the same method as a standard normal
+                // fire mode" — the default firing animation for the stance
+                // the player is already in.
                 try
                 {
-                    shared.m_attack.m_attackAnimation = "staff_rapidfire";
-                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> staff_rapidfire");
+                    shared.m_attack.m_attackAnimation = "crossbow_fire";
+                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> crossbow_fire");
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 

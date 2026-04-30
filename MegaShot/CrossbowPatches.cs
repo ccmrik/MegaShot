@@ -536,6 +536,12 @@ namespace MegaShot
         // 1× and the trigger is re-asserted each shot/frame, so high fire
         // rates loop naturally rather than compressing the clip.
 
+        // v2.6.43 — explicit 100 rps gate for Armageddon's animation pulse
+        // (Milord's spec: simulate FireRate=100 in normal mode, which
+        // produces a constant-beam look). 10 ms cadence. Per-frame spam was
+        // both too fast (>100 Hz at higher framerates) and FPS-coupled.
+        private static float _lastArmageddonAnimPulse = -999f;
+
         // Beam particles: tiny glowing motes along the beam path so it reads as
         // ionised energy rather than a solid line. World-space sim, short life,
         // perpendicular drift. Hand-emitted each frame along the ray.
@@ -1607,23 +1613,20 @@ namespace MegaShot
                 // throttle, no state gate — frame-rate spam (60-200 Hz)
                 // IS the visual.
                 //
-                // Critical layer-weight override: `staff_rapidfire` plays on
-                // animator layer 1 (upper-body overlay). Vanilla drops that
-                // layer's weight to 0 while sprinting. `ArmageddonKey`
-                // defaults to LeftCtrl (crouch) which doesn't conflict, but
-                // a user who rebinds to a sprint-conflicting key still gets
-                // the cast. Force it every frame.
-                try
-                {
-                    if (cachedAnimator != null && cachedAnimator.layerCount > 1)
-                        cachedAnimator.SetLayerWeight(1, 1f);
-                }
-                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-
+                // v2.6.43: animation pulse uses `crossbow_fire` (matches the
+                // crossbow stance the animator is parked in by m_skillType).
+                // Gate at 100 rps explicitly per Milord's spec — the same
+                // cadence Normal mode at FireRate=100 produces, which reads
+                // as a constant beam because the crossbow_fire clip is
+                // restarted every 10 ms and the body parks on early frames.
                 try
                 {
                     var atk = weapon?.m_shared?.m_attack;
-                    if (atk != null) PulseFiringAnimation(player, atk);
+                    if (atk != null && Time.time - _lastArmageddonAnimPulse >= 0.01f)
+                    {
+                        PulseFiringAnimation(player, atk);
+                        _lastArmageddonAnimPulse = Time.time;
+                    }
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
