@@ -220,18 +220,12 @@ namespace MegaShot
                 try { shared.m_secondaryAttack.m_drawEitrDrain = 0f; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
                 try { shared.m_secondaryAttack.m_requiresReload = false; } catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
-                // Override the cast trigger to `staff_rapidfire` (no-charge
-                // rapid-fire variant from the v2.6.31 ANIM-DIAG dump). Dundr
-                // ships with `staff_lightningshot` which is gated on the
-                // `staff_charging` BOOL — wrong for our use case. v2.6.33
-                // confirmed the rapid-fire trigger plays correctly per shot.
-                // Re-introduced in v2.6.35 alongside the Armageddon throttle.
-                try
-                {
-                    shared.m_attack.m_attackAnimation = "staff_rapidfire";
-                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> staff_rapidfire");
-                }
-                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
+                // v2.6.39: m_attackAnimation override removed. Even paired
+                // with the no-op PulseFiringAnimation stub, leaving Dundr's
+                // staff_rapidfire active here meant any vanilla code path
+                // that calls SetTrigger via this field (Attack.Start, etc.)
+                // could still drive the animator into the locking state.
+                // Belt-and-braces: leave Dundr's original value alone.
 
                 // Base damage (level 1) + linear per-level increment for native tooltip support
                 // Dundr native type is lightning; our postfix overrides with split values

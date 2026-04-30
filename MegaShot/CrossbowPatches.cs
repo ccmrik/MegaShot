@@ -1580,9 +1580,14 @@ namespace MegaShot
                     return;
                 }
 
-                EnsureBeamRenderer();
-                EnsureBeamParticles();
-                if (beamLine == null) return;
+                // v2.6.39: custom LineRenderer beam visual + particle motes
+                // removed at Milord's request. The visual was potentially
+                // overriding/hiding the underlying Dundr cast pose. Now we
+                // just raycast for damage targeting and let the vanilla
+                // Dundr animation (driven by SetTrigger below) do its own
+                // visual. If we want a beam back later it should ride on
+                // top of the cast, not replace it.
+                StopArmageddonBeam();
 
                 // Find impact point (or the far end of the ray when nothing is hit).
                 float maxRange = Mathf.Max(50f, (float)MegaShotPlugin.ArmageddonRange.Value);
@@ -1590,73 +1595,6 @@ namespace MegaShot
                 Vector3 endPoint;
                 bool isDamageable;
                 bool hasHit = BeamRaycast(aimRay, player, maxRange, out hit, out endPoint, out isDamageable);
-
-                // Track when the beam last struck a damageable target; drives the flash.
-                if (hasHit && isDamageable) lastBeamHitTime = Time.time;
-                // Flash decays over ~150ms after last hit tick.
-                float flash = Mathf.Clamp01(1f - (Time.time - lastBeamHitTime) / 0.15f);
-
-                Vector3 origin = player.transform.position + Vector3.up * 1.5f;
-
-                // Fast pulse for width/alpha + faster flicker for brightness variation.
-                beamPulsePhase = (beamPulsePhase + Time.deltaTime * 22f) % (Mathf.PI * 2f);
-                float pulse     = 0.5f + 0.5f * Mathf.Sin(beamPulsePhase);
-                float flicker   = 0.7f + 0.3f * UnityEngine.Random.value; // per-frame jitter
-                // Extra strobe while flashing — crank the jitter/brightness.
-                float hitStrobe = flash > 0f ? (0.6f + 0.4f * UnityEngine.Random.value) : 0f;
-
-                // Scope compensates for FOV: zoom divides FOV by zoomLevel, so the beam
-                // would otherwise appear zoomLevel× thicker through the scope. Shrink the
-                // world width by the same factor so the apparent width stays constant.
-                float widthScale = (zooming && zoomLevel > 0.01f) ? (1f / zoomLevel) : 1f;
-
-                // Base width breathes subtly. endWidth flares dramatically on hit
-                // to create a visible "impact bloom" at the target.
-                float baseStart = 0.035f + pulse * 0.015f;
-                float baseEnd   = 0.015f + pulse * 0.008f;
-                float endFlare  = 1f + flash * (4f + hitStrobe * 2f); // up to ~6× fatter when striking
-                beamLine.startWidth = baseStart * widthScale * (1f + flash * 0.6f);
-                beamLine.endWidth   = baseEnd   * widthScale * endFlare;
-
-                // Red normally, blending toward a hot white-orange core while flashing.
-                Color coreRed    = new Color(1f, 0.05f * flicker, 0.05f * flicker, 1f);
-                Color tailRed    = new Color(0.9f * flicker, 0.00f, 0.00f, 0.75f);
-                Color coreOrange = new Color(1f, 0.85f, 0.55f, 1f); // hot white-orange at the muzzle
-                Color tailOrange = new Color(1f, 0.55f, 0.10f, 1f); // saturated orange flare at impact
-                beamLine.startColor = Color.Lerp(coreRed, coreOrange, flash * 0.6f);
-                beamLine.endColor   = Color.Lerp(tailRed, tailOrange, flash);
-
-                // Build 7-vertex polyline with tiny perpendicular noise on interior points.
-                // Jitter magnitude is tied to distance so it stays readable at range.
-                Vector3 dir = endPoint - origin;
-                float len = dir.magnitude;
-                Vector3 fwd = (len > 0.0001f) ? (dir / len) : Vector3.forward;
-                // Perpendicular axes in world space — cross with world-up then with fwd.
-                Vector3 right = Vector3.Cross(fwd, Vector3.up);
-                if (right.sqrMagnitude < 0.0001f) right = Vector3.Cross(fwd, Vector3.right);
-                right.Normalize();
-                Vector3 up = Vector3.Cross(right, fwd).normalized;
-                float jitterScale = Mathf.Lerp(0.005f, 0.04f, Mathf.Clamp01(len / 120f));
-                // Hit flash wobbles the beam harder for a "live wire" feel.
-                jitterScale *= 1f + flash * 2.5f;
-
-                beamPositions[0] = origin;
-                beamPositions[BeamSegments - 1] = endPoint;
-                for (int i = 1; i < BeamSegments - 1; i++)
-                {
-                    float t = i / (float)(BeamSegments - 1);
-                    Vector3 straight = Vector3.Lerp(origin, endPoint, t);
-                    // Interior jitter: small perpendicular offset, multi-frequency.
-                    float jr = (Mathf.PerlinNoise(Time.time * 12f + i * 3.7f, 0.31f) - 0.5f) * 2f;
-                    float ju = (Mathf.PerlinNoise(0.73f, Time.time * 12f + i * 3.7f) - 0.5f) * 2f;
-                    straight += right * (jr * jitterScale) + up * (ju * jitterScale);
-                    beamPositions[i] = straight;
-                }
-                beamLine.SetPositions(beamPositions);
-                beamLine.enabled = true;
-
-                // Seed energy motes along the beam — matches width scope-compensation.
-                EmitBeamParticles(origin, endPoint, flash, widthScale);
 
                 // Stamp the beam-active timestamp so the drop suppressor swallows
                 // junk drops (stone/wood/etc.) that spawn anywhere in the world for
@@ -1962,36 +1900,24 @@ namespace MegaShot
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
+        // EMERGENCY STUB v2.6.39 — animation pulse is a no-op again.
+        // Even at 10 rps Normal/Alt fire rate the trigger restarts the
+        // 0.467 s rapid-fire clip before it completes, leaving the animator
+        // permanently in attack state and locking input. The throttle for
+        // Armageddon worked but Normal/Alt's per-shot pulse was the new
+        // lockup vector. Until we rewrite this state-aware (only retrigger
+        // when the animator has actually exited the rapid-fire state), it's
+        // safer to ship zero animation than to ship a lockup.
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
-            if (player == null || attack == null) return;
+            // Defensive only: clear stale animator-speed scaling left by
+            // older builds. Touch nothing else.
             try
             {
                 if (cachedAnimator == null)
-                    cachedAnimator = player.GetComponentInChildren<Animator>();
+                    cachedAnimator = player?.GetComponentInChildren<Animator>();
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
-
-                // Try to measure clip length when the animator is currently in
-                // the rapid-fire state (i.e. between this trigger and the next
-                // pulse). Cheap if already measured.
-                TryMeasureRapidfireClip();
-
-                if (!_zanimFieldCached)
-                {
-                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
-                    _zanimFieldCached = true;
-                }
-                if (_zanimField == null) return;
-                var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
-                if (zanim == null) return;
-
-                if (!string.IsNullOrEmpty(attack.m_attackAnimation))
-                {
-                    zanim.SetTrigger(attack.m_attackAnimation);
-                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                        DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
-                }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
