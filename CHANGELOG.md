@@ -5,6 +5,21 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.28] - 2026-04-30
+
+### Fixed
+- **Firing animation still invisible after v2.6.27.** Diagnostic log confirmed `staff_lightningshot` was being SetTriggered every shot, but no visible animation. Conclusion: the animator's transition into the cast state is gated on something vanilla `Attack.Start` sets (likely `m_currentAttack != null` BOOL, an `IsBowDrawn`, or similar) and our manual SetTrigger doesn't satisfy it. Switched to **`Animator.CrossFadeInFixedTime`** which forces the state directly, bypassing transition conditions. State layer is auto-detected and cached. SetTrigger is still called on top for ZSyncAnimation network replication so other players see the cast.
+
+### Notes
+- Per-shot (Normal + Alt fire): one CrossFade + SetTrigger per shot → full Dundr cast plays.
+- Armageddon laser: CrossFade + SetTrigger every frame → state restarts each frame from `normalizedTime=0` → continuous looped cast pose for the beam stream.
+- DebugMode logs:
+  - One-time `ANIM: cached state '<name>' hash=<n> layer=<n>` on first pulse to show whether the state was found.
+  - Per-pulse `ANIM: SetTrigger('<name>') + CrossFade(layer=<n>)` so we can tell if the state is unfound (`layer=-1`).
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `PulseFiringAnimation` now does `Animator.CrossFadeInFixedTime` to the cached state hash + layer, plus the SetTrigger call.
+
 ## [2.6.27] - 2026-04-30
 
 ### Fixed

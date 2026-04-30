@@ -1821,17 +1821,23 @@ namespace MegaShot
         // is firing) so Dundr's cast pose plays for every shot and streams
         // continuously while LMB is held in laser mode.
         //
-        // Critically: only SetTrigger via ZSyncAnimation. Do NOT call
-        // Animator.Play(currentState, 0, 0f) — that resets the current state
-        // each invocation, which cancels the transition that the just-set
-        // trigger was about to fire. Vanilla relies on SetTrigger alone for
-        // the same animation pipeline. And do NOT scale animator.speed —
-        // speed=fireRate (or even ×5) compresses Dundr's ~1 s cast into a
-        // few frames and renders as "no animation".
+        // v2.6.27 used SetTrigger only — log confirmed the trigger
+        // (`staff_lightningshot`) fired every shot but NO visible animation.
+        // The animator's transition condition into the cast state evidently
+        // wasn't satisfied (probably gated on `m_currentAttack != null` or
+        // a similar BOOL that vanilla's `Attack.Start` sets).
         //
-        // For high fire rates the trigger is re-asserted every shot anyway;
-        // the animator transitions back into the cast state on each pulse,
-        // producing a continuous loop without artificial speed-ups.
+        // v2.6.28 takes a more direct route: search every animator layer for
+        // a state whose name matches `m_attackAnimation` and CrossFade into
+        // it. CrossFade bypasses transition conditions entirely — if the
+        // state exists it plays. SetTrigger is also called for ZSyncAnimation
+        // network sync (so other players see the cast).
+        //
+        // Diagnostic logs which path produced output (or whether the state
+        // wasn't found in any layer) so we can iterate without re-spinning.
+        private static int cachedAttackStateHash = 0;
+        private static int cachedAttackStateLayer = -1;
+        private static string cachedAttackStateName = null;
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
@@ -1842,26 +1848,64 @@ namespace MegaShot
                     zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
                     zanimFieldCached = true;
                 }
-                // Restore animator speed to 1× if a previous build left it
-                // scaled up (some users will be upgrading mid-session).
                 if (cachedAnimator == null)
                     cachedAnimator = player.GetComponentInChildren<Animator>();
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
 
-                if (zanimField != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
+                string animName = attack.m_attackAnimation;
+                if (string.IsNullOrEmpty(animName))
+                {
+                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                        DiagnosticHelper.Log("ANIM: skipped — empty attack.m_attackAnimation");
+                    return;
+                }
+
+                // CrossFade directly into the state — bypasses transition gates.
+                if (cachedAnimator != null)
+                {
+                    // Cache the layer once: walking every layer per shot is wasteful.
+                    if (cachedAttackStateName != animName)
+                    {
+                        cachedAttackStateName = animName;
+                        cachedAttackStateHash = Animator.StringToHash(animName);
+                        cachedAttackStateLayer = -1;
+                        for (int layer = 0; layer < cachedAnimator.layerCount; layer++)
+                        {
+                            if (cachedAnimator.HasState(layer, cachedAttackStateHash))
+                            {
+                                cachedAttackStateLayer = layer;
+                                break;
+                            }
+                        }
+                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                            DiagnosticHelper.Log("ANIM: cached state '" + animName + "' hash=" + cachedAttackStateHash + " layer=" + cachedAttackStateLayer + " (layerCount=" + cachedAnimator.layerCount + ")");
+                    }
+
+                    if (cachedAttackStateLayer >= 0)
+                    {
+                        // Fixed-time crossfade — 0.05 s blend, normalized time 0,
+                        // fixed-time offset 0. Makes the state RESTART each call,
+                        // which is what we want for repeated shots / the laser stream.
+                        cachedAnimator.CrossFadeInFixedTime(cachedAttackStateHash, 0.05f, cachedAttackStateLayer, 0f, 0f);
+                    }
+                    else if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
+                    {
+                        DiagnosticHelper.Log("ANIM: state '" + animName + "' not found in any animator layer — falling back to SetTrigger only");
+                    }
+                }
+
+                // SetTrigger via ZSyncAnimation for network replication
+                // (other players see the cast pose via this RPC).
+                if (zanimField != null)
                 {
                     var zanim = zanimField.GetValue(player) as ZSyncAnimation;
                     if (zanim != null)
                     {
-                        zanim.SetTrigger(attack.m_attackAnimation);
+                        zanim.SetTrigger(animName);
                         if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                            DiagnosticHelper.Log("ANIM: SetTrigger('" + attack.m_attackAnimation + "')");
+                            DiagnosticHelper.Log("ANIM: SetTrigger('" + animName + "') + CrossFade(layer=" + cachedAttackStateLayer + ")");
                     }
-                }
-                else if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                {
-                    DiagnosticHelper.Log("ANIM: skipped — zanimField=" + (zanimField != null) + " trigger='" + (attack?.m_attackAnimation ?? "<null>") + "'");
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
