@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "Mega Shot";
-        public const string PluginVersion = "2.6.46";
+        public const string PluginVersion = "2.6.47";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -62,7 +62,9 @@ namespace MegaShot
         // Armageddon Mode
         public static ConfigEntry<bool> ArmageddonEnabled;
         public static ConfigEntry<KeyCode> ArmageddonKey;
+        public static ConfigEntry<KeyCode> ArmageddonKey2;
         public static ConfigEntry<int> ArmageddonFireRate;
+        public static ConfigEntry<int> ArmageddonSoundRate;
         public static ConfigEntry<int> ArmageddonAoeRadius;
         public static ConfigEntry<bool> ArmageddonSuppressDrops;
         public static ConfigEntry<bool> ArmageddonSuppressFx;
@@ -156,9 +158,13 @@ namespace MegaShot
             ArmageddonEnabled = Config.Bind("9. Armageddon Mode", "Enabled", false,
                 "Enable Armageddon Mode. Hold the modifier key while firing for unlimited full-auto destruction (skips trees/logs)");
             ArmageddonKey = Config.Bind("9. Armageddon Mode", "ArmageddonKey", KeyCode.LeftControl,
-                "Hold this key while firing to engage Armageddon Mode (only when Enabled).");
+                "Primary modifier — hold while firing to engage Armageddon Mode. Set to None to disable.");
+            ArmageddonKey2 = Config.Bind("9. Armageddon Mode", "ArmageddonKey2", KeyCode.Mouse4,
+                "Alternative modifier — held alongside or instead of ArmageddonKey. Mouse4 is the typical 'side button' mapping (Logitech G502 G4/G5/G6 land here if G HUB is set to send Mouse Button 4). Set to None to disable.");
             ArmageddonFireRate = Config.Bind("9. Armageddon Mode", "FireRate", 100,
                 new ConfigDescription("Bolts per second while Armageddon is held. Default 100. Each bolt carries the Armageddon damage tag.", new AcceptableValueRange<int>(1, 100)));
+            ArmageddonSoundRate = Config.Bind("9. Armageddon Mode", "SoundRate", 24,
+                new ConfigDescription("Voices per second for the bolt-fire SFX while Armageddon is held. Higher = denser/louder roar; ~24-30 reads as continuous thunder, beyond that it just stacks volume.", new AcceptableValueRange<int>(1, 60)));
             ArmageddonAoeRadius = Config.Bind("9. Armageddon Mode", "AoeRadius", 10,
                 new ConfigDescription("Armageddon AOE radius in metres (overrides AOE Radius while modifier held)", new AcceptableValueRange<int>(0, 100)));
             ArmageddonSuppressDrops = Config.Bind("9. Armageddon Mode", "SuppressDrops", true,
@@ -269,7 +275,14 @@ namespace MegaShot
         public static bool IsArmageddonActive()
         {
             if (ArmageddonEnabled == null || !ArmageddonEnabled.Value) return false;
-            try { return Input.GetKey(ArmageddonKey.Value); }
+            try
+            {
+                if (ArmageddonKey != null && ArmageddonKey.Value != KeyCode.None
+                    && Input.GetKey(ArmageddonKey.Value)) return true;
+                if (ArmageddonKey2 != null && ArmageddonKey2.Value != KeyCode.None
+                    && Input.GetKey(ArmageddonKey2.Value)) return true;
+                return false;
+            }
             catch { return false; }
         }
 

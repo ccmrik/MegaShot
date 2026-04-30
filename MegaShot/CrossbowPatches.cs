@@ -1248,12 +1248,19 @@ namespace MegaShot
                     cachedFireClip = FindFireClip(attack, weapon);
                 }
 
-                if (fireRate > SOUND_THROTTLE_RATE)
+                // v2.6.47: in Armageddon, the throttle uses ArmageddonSoundRate
+                // (default 24, range 1-60) for a denser thunder-roar; otherwise
+                // the constant 12/sec keeps Normal mode tame.
+                float effectiveSoundRate = armageddon
+                    ? (float)MegaShotPlugin.ArmageddonSoundRate.Value
+                    : SOUND_THROTTLE_RATE;
+
+                if (fireRate > effectiveSoundRate)
                 {
-                    // --- THROTTLED MODE: high fire rates (>12 rps) ---
-                    // PlayOneShot capped at ~12/sec. Overlapping tails create
-                    // a continuous sound naturally — no looping needed.
-                    float soundInterval = 1f / SOUND_THROTTLE_RATE;
+                    // --- THROTTLED MODE: high fire rates (>effectiveSoundRate rps) ---
+                    // PlayOneShot capped at effectiveSoundRate. Overlapping tails
+                    // create a continuous sound naturally — no looping needed.
+                    float soundInterval = 1f / effectiveSoundRate;
                     if (Time.time - lastSoundTime >= soundInterval)
                     {
                         lastSoundTime = Time.time;
