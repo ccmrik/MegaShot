@@ -5,6 +5,18 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.38] - 2026-04-30
+
+### Fixed (urgent)
+- **MegaShot's `Awake()` aborted silently after a fresh cfg-delete.** Line 82 in `MegaShotPlugin.cs` called `Config.Reload()` *before* any `Config.Bind()` calls. With the cfg file deleted (Milord's setup after the v2.6.37 default change), `Reload()` threw on a missing file and BepInEx silently swallowed the exception. Result: no Bind calls ran → no cfg regenerated → no Harmony patches applied → MegaShot effectively dead until the cfg was put back. Now guarded with `File.Exists(Config.ConfigFilePath)`. (This is the exact trap captured in the `feedback-bepinex-config-reload` memory note that I should've caught earlier.)
+- **`PluginVersion` constant was frozen at `"2.6.24"`** — never bumped during the v2.6.25→v2.6.37 release churn (we only edited the csproj `<Version>`). BepInEx logs the plugin metadata version, so every recent log showed `Loading [Mega Shot 2.6.24]` and made the silent Awake failure look like the wrong version was even loading. Bumped to `"2.6.38"`. From now on this constant must be kept in sync with `<Version>` on every release.
+
+### Added
+- `Logger.LogInfo($"{PluginName} v{PluginVersion} loaded!")` at the end of `Awake()`. Same load-confirmation pattern every other Mega mod uses. If MegaShot's Awake silently aborts again (any reason), the absence of this line in `LogOutput.log` will make the failure obvious instead of having to deduce it from a missing cfg file.
+
+### Files touched
+- `MegaShot/MegaShotPlugin.cs`
+
 ## [2.6.37] - 2026-04-30
 
 ### Changed

@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "Mega Shot";
-        public const string PluginVersion = "2.6.24";
+        public const string PluginVersion = "2.6.38";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -79,7 +79,13 @@ namespace MegaShot
         private void Awake()
         {
             MigrateConfig(Config.ConfigFilePath);
-            Config.Reload();
+            // Guard Config.Reload with File.Exists. Calling Reload on a missing
+            // cfg file throws and aborts Awake silently — no Bind calls, no cfg
+            // regen, no Harmony patches. Bit Milord on a fresh-profile / cfg-
+            // delete scenario in v2.6.37: deleted cfg → MegaShot silently
+            // failed to load → no cfg ever appeared again. (See
+            // feedback-bepinex-config-reload memory note.)
+            if (File.Exists(Config.ConfigFilePath)) Config.Reload();
 
             // General
             ModEnabled = Config.Bind("1. General", "Enabled", true, "Enable or disable the mod");
@@ -224,6 +230,8 @@ namespace MegaShot
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
             }
+
+            Logger.LogInfo($"{PluginName} v{PluginVersion} loaded!");
         }
 
         private void OnDestroy()
