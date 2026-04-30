@@ -5,6 +5,24 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.31] - 2026-04-30
+
+### Fixed
+- **"Trinket"-like sound on every shot, no firing animation.** v2.6.29/30's vanilla `StartAttack` invocation was firing `Attack.m_startEffect` (Dundr's cast SFX = the trinket sound Milord heard) every call, but the cast animation never actually played in the animator — confirmed by the v2.6.30 log where `m_currentAttack` never auto-cleared (vanilla's cast-end animation event never fired) and our 1.5 s safety-net timeout had to step in every cycle. So we paid the audio cost for none of the visual benefit.
+
+### Reverted / Changed
+- Removed the entire vanilla-`StartAttack` pipeline: no more induced StartAttack call, no more `m_currentAttack` reflection-clearing, no more `m_attackProjectile` null swap. Restored simple `ZSyncAnimation.SetTrigger` (same call vanilla's `Attack.Start` makes internally for the trigger).
+- Animation may still not be visible — but no spurious sounds either. We're back to the same baseline as v2.6.27 with the vanilla-StartAttack mistake undone.
+
+### Added — diagnostic dump
+- `DumpAnimatorOnce` writes a one-time dump of the player animator on first fire pulse:
+  - Layer count + per-layer names + current state hash + state length + normalizedTime.
+  - All animator parameters (name + type + hash).
+- This will tell us which BOOLs / INTs the player animator actually has, which is what we need to find the gate condition `staff_lightningshot` is checking. The trigger fires fine; something else along the transition rejects it. Once we have the dump, the next iteration can SetBool/SetInt the right gate state alongside the trigger.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `PulseFiringAnimation` reduced to SetTrigger + animator dump. Stale flag fields kept (compat with `PatchBlockVanillaAttack`'s flag check) but values are dead.
+
 ## [2.6.30] - 2026-04-30
 
 ### Fixed

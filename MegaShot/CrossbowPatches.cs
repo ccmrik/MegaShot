@@ -1857,18 +1857,44 @@ namespace MegaShot
         // `Attack.OnAttackTrigger` to short-circuit when the firing flag
         // hasn't been set by us — i.e. the legitimate vanilla path is fine,
         // but our induced StartAttack call won't double-fire a Dundr bolt.
-        internal static bool _vanillaStartAttackAllowed = false;
-        internal static bool _suppressVanillaProjectile = false; // unused after v2.6.30, kept for compat
-        // Vanilla's natural rate-limit (m_currentAttack) is what runs the cast
-        // animation to completion. Don't clear it forcibly — that restarts
-        // the animation from frame 0 every call and freezes it.
+        // Reverted in v2.6.31: do NOT call vanilla StartAttack. It plays
+        // m_startEffect (Dundr's cast SFX = the "trinket sound") every call
+        // without actually producing the cast animation — the animator state
+        // machine evidently rejects the transition without additional gating
+        // state vanilla sets through a path we haven't found yet. So we get
+        // the audio cost with none of the visual benefit.
         //
-        // Safety net: if m_currentAttack hasn't auto-cleared after a generous
-        // timeout (1.5s — Dundr cast is ~1s), nuke it manually so we don't
-        // get stuck if vanilla's cleanup chain is interrupted somehow.
-        private static FieldInfo _currentAttackField;
-        private static float _lastSuccessfulStartAttack = -999f;
-        private const float STARTATTACK_TIMEOUT_SEC = 1.5f;
+        // For now: just SetTrigger via ZSyncAnimation (same as vanilla's
+        // call into Attack.Start does internally). Animation may not play
+        // visibly but no spurious sound effects fire either. The diagnostic
+        // dump below will tell us which animator parameters / states exist
+        // so we can find what gate the cast transition is checking.
+        internal static bool _vanillaStartAttackAllowed = false; // unused, kept so PatchBlockVanillaAttack still compiles
+        internal static bool _suppressVanillaProjectile = false; // unused
+        private static FieldInfo _zanimField;
+        private static bool _zanimFieldCached = false;
+        private static bool _animatorDiagDumped = false;
+
+        private static void DumpAnimatorOnce(Animator animator)
+        {
+            if (_animatorDiagDumped) return;
+            if (animator == null) return;
+            if (MegaShotPlugin.DebugMode == null || !MegaShotPlugin.DebugMode.Value) return;
+            try
+            {
+                _animatorDiagDumped = true;
+                DiagnosticHelper.Log("ANIM-DIAG: layerCount=" + animator.layerCount + " paramCount=" + animator.parameters.Length);
+                foreach (var p in animator.parameters)
+                    DiagnosticHelper.Log("ANIM-DIAG: param " + p.name + " (" + p.type + ") hash=" + p.nameHash);
+                for (int layer = 0; layer < animator.layerCount; layer++)
+                {
+                    var info = animator.GetCurrentAnimatorStateInfo(layer);
+                    DiagnosticHelper.Log("ANIM-DIAG: layer" + layer + " name='" + animator.GetLayerName(layer) + "' currentStateHash=" + info.fullPathHash + " shortHash=" + info.shortNameHash + " length=" + info.length + " normalizedTime=" + info.normalizedTime);
+                }
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
@@ -1879,54 +1905,17 @@ namespace MegaShot
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
 
-                if (_currentAttackField == null)
-                    _currentAttackField = typeof(Humanoid).GetField("m_currentAttack",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (!_animatorDiagDumped) DumpAnimatorOnce(cachedAnimator);
 
-                // Skip if vanilla's previous cast is still running. Vanilla
-                // auto-clears m_currentAttack via the animation event chain
-                // when the cast finishes; our next call accepts at that point.
-                object currentAttack = null;
-                try { currentAttack = _currentAttackField?.GetValue(player); } catch { }
-                if (currentAttack != null)
+                if (!_zanimFieldCached)
                 {
-                    // Stuck-attack timeout: force-clear if we've been waiting
-                    // longer than the cast's natural duration with no progress.
-                    if (Time.time - _lastSuccessfulStartAttack > STARTATTACK_TIMEOUT_SEC)
-                    {
-                        try { _currentAttackField?.SetValue(player, null); } catch { }
-                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                            DiagnosticHelper.Log("ANIM: timeout — force-cleared m_currentAttack");
-                    }
-                    else
-                    {
-                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                            DiagnosticHelper.Log("ANIM: skipped — vanilla cast still running");
-                        return;
-                    }
+                    _zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
+                    _zanimFieldCached = true;
                 }
-
-                var weaponAttack = player.GetCurrentWeapon()?.m_shared?.m_attack;
-                GameObject savedProjectile = null;
-                if (weaponAttack != null)
+                if (_zanimField != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
                 {
-                    savedProjectile = weaponAttack.m_attackProjectile;
-                    weaponAttack.m_attackProjectile = null;
-                }
-
-                _vanillaStartAttackAllowed = true;
-                bool started = false;
-                try
-                {
-                    started = player.StartAttack(null, false);
-                    if (started) _lastSuccessfulStartAttack = Time.time;
-                    if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                        DiagnosticHelper.Log("ANIM: vanilla StartAttack returned " + started + " (anim='" + (attack.m_attackAnimation ?? "<null>") + "')");
-                }
-                finally
-                {
-                    _vanillaStartAttackAllowed = false;
-                    if (weaponAttack != null) weaponAttack.m_attackProjectile = savedProjectile;
+                    var zanim = _zanimField.GetValue(player) as ZSyncAnimation;
+                    if (zanim != null) zanim.SetTrigger(attack.m_attackAnimation);
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
