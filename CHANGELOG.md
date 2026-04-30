@@ -5,6 +5,15 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.26] - 2026-04-30
+
+### Changed
+- **Armageddon laser now drives the same firing animation as Fire mode, looped continuously.** While the beam is firing, the player's body holds the draw/release pose every frame via `ZSyncAnimation.SetTrigger(m_attackAnimation)` plus a periodic `Animator.Play(currentState, 0, 0f)` so the pose doesn't stall on its end frame. Streams smoothly without per-frame jitter.
+- **Firing animation now visible at high fire rates again.** The animator-speed cap was effectively `fireRate` itself, which at 100 rps played the entire attack animation in 10 ms — completely invisible. Capped at 5× so even at 100 rps the draw/release motion reads.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — extracted `PulseFiringAnimation` helper used by `FireBolt` and `UpdateArmageddonBeam`. Added `FIRE_ANIM_MAX_SPEED`, `ARMAGEDDON_ANIM_SPEED`, `ARMAGEDDON_ANIM_RESTART_FRAMES` constants.
+
 ## [2.6.25] - 2026-04-30
 
 ### Fixed

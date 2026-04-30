@@ -515,6 +515,18 @@ namespace MegaShot
         // the throttle. Frame-rate independent at a visually smooth cadence.
         private const float BEAM_TICK_RATE = 30f;
 
+        // Cap the animator playback speed for the firing animation. Anything
+        // above ~5× and the player's draw/release pose is too fast to read.
+        // FireRate=100 (e.g. high-rate setups) used to set speed=100 and the
+        // animation became invisible.
+        private const float FIRE_ANIM_MAX_SPEED = 5f;
+        // Armageddon laser uses a slightly lower speed so the looped pose
+        // stays visually steady (no jittery pumping while LMB is held).
+        private const float ARMAGEDDON_ANIM_SPEED = 3f;
+        // Restart-cadence for Armageddon: replay the current state every Nth
+        // frame so the attack pose stays alive without jittering every frame.
+        private const int ARMAGEDDON_ANIM_RESTART_FRAMES = 4;
+
         // Beam particles: tiny glowing motes along the beam path so it reads as
         // ionised energy rather than a solid line. World-space sim, short life,
         // perpendicular drift. Hand-emitted each frame along the ray.
@@ -1209,42 +1221,11 @@ namespace MegaShot
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
-            // 10. Animation - force restart at fire-rate speed so every shot shows
-            try
-            {
-                if (!zanimFieldCached)
-                {
-                    zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
-                    zanimFieldCached = true;
-                }
-
-                if (cachedAnimator == null)
-                    cachedAnimator = player.GetComponentInChildren<Animator>();
-
-                float fireRate = MegaShotPlugin.GetEffectiveFireRate();
-
-                if (cachedAnimator != null)
-                {
-                    // Scale animator speed so full attack animation fits within one fire interval
-                    // A typical crossbow attack anim is ~1s, so at rate 10 we need 10x speed
-                    cachedAnimator.speed = Mathf.Max(1f, fireRate);
-
-                    // Force restart the current animation state from the beginning.
-                    // This is critical: SetTrigger alone won't replay if we're already
-                    // in the attack state. Play(hash, 0, 0f) restarts it every shot.
-                    AnimatorStateInfo stateInfo = cachedAnimator.GetCurrentAnimatorStateInfo(0);
-                    cachedAnimator.Play(stateInfo.fullPathHash, 0, 0f);
-                }
-
-                // Also fire the trigger via ZSyncAnimation for network sync
-                if (zanimField != null)
-                {
-                    var zanim = zanimField.GetValue(player) as ZSyncAnimation;
-                    if (zanim != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
-                        zanim.SetTrigger(attack.m_attackAnimation);
-                }
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            // 10. Animation — pulse the attack trigger + restart current state.
+            // Animator speed capped at FIRE_ANIM_MAX_SPEED so the visual reads
+            // even at high fire rates (animator.speed = fireRate at 100rps was
+            // 100× — animation completed in 10 ms and was effectively invisible).
+            PulseFiringAnimation(player, attack, Mathf.Min(MegaShotPlugin.GetEffectiveFireRate(), FIRE_ANIM_MAX_SPEED), restartState: true);
 
             // 11. Adaptive sound system — two tiers based on fire rate:
             //     ≤15 rps: per-shot effects (all 3 Valheim fallback attempts, like vanilla)
@@ -1665,6 +1646,21 @@ namespace MegaShot
                 // sub-area fractures whose drops scatter well past the raw impact.
                 ArmageddonSuppression.MarkBeamActive();
 
+                // Pulse the player's firing animation continuously while LMB is
+                // held so the body holds the draw/release pose like a constant
+                // stream of crossbow fire. Restart the state every Nth frame so
+                // it doesn't stall on the end frame.
+                try
+                {
+                    var atk = weapon?.m_shared?.m_attack;
+                    if (atk != null)
+                    {
+                        bool restart = (Time.frameCount % ARMAGEDDON_ANIM_RESTART_FRAMES) == 0;
+                        PulseFiringAnimation(player, atk, ARMAGEDDON_ANIM_SPEED, restartState: restart);
+                    }
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+
                 // Damage ticks at a fixed constant rate — no longer gated by FireRate config.
                 float interval = 1f / BEAM_TICK_RATE;
                 if (Time.time - lastBeamTickTime < interval) return;
@@ -1832,6 +1828,40 @@ namespace MegaShot
                 cachedAudioSource.maxDistance = 50f;
                 cachedAudioSource.rolloffMode = AudioRolloffMode.Linear;
             }
+        }
+
+        // Pulses the player's firing animation. Used by both per-shot fire
+        // (each FireBolt call) and the Armageddon laser (each frame the beam
+        // is firing) so the player's body shows the same draw/release pose
+        // continuously while LMB is held in laser mode.
+        private static void PulseFiringAnimation(Player player, Attack attack, float speed, bool restartState)
+        {
+            if (player == null || attack == null) return;
+            try
+            {
+                if (!zanimFieldCached)
+                {
+                    zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
+                    zanimFieldCached = true;
+                }
+                if (cachedAnimator == null)
+                    cachedAnimator = player.GetComponentInChildren<Animator>();
+                if (cachedAnimator != null)
+                {
+                    cachedAnimator.speed = Mathf.Max(1f, speed);
+                    if (restartState)
+                    {
+                        AnimatorStateInfo si = cachedAnimator.GetCurrentAnimatorStateInfo(0);
+                        cachedAnimator.Play(si.fullPathHash, 0, 0f);
+                    }
+                }
+                if (zanimField != null && !string.IsNullOrEmpty(attack.m_attackAnimation))
+                {
+                    var zanim = zanimField.GetValue(player) as ZSyncAnimation;
+                    if (zanim != null) zanim.SetTrigger(attack.m_attackAnimation);
+                }
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
         // Applies a Character-only splash around the impact point when the
