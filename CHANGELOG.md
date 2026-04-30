@@ -5,6 +5,18 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.37] - 2026-04-30
+
+### Changed
+- **`ArmageddonKey` default changed from `LeftShift` to `LeftControl`.** LeftShift is Valheim's sprint key — holding it during Armageddon put the player in sprint state, dropping animator layer 1's weight to 0 and hiding the upper-body cast overlay (the bug v2.6.36's `SetLayerWeight` workaround papers over). LeftControl is vanilla's crouch key, doesn't suppress upper-body overlays, and gives a more tactical "aim mode" pose. Cleaner design — no fighting vanilla.
+- The v2.6.36 layer-weight override stays as belt-and-suspenders so any user who keeps `LeftShift` (or rebinds to another sprint-conflicting key) still sees the cast.
+
+### Notes
+- **Existing users keep their cfg value** — BepInEx never overwrites existing keys. Edit `BepInEx/config/com.rik.megashot.cfg` and set `ArmageddonKey = LeftControl` (or delete the cfg to regen with the new default).
+
+### Files touched
+- `MegaShot/MegaShotPlugin.cs`
+
 ## [2.6.36] - 2026-04-30
 
 ### Fixed

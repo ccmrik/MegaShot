@@ -149,8 +149,8 @@ namespace MegaShot
             // destroys rocks/saplings/ores/destructibles but spares trees and logs.
             ArmageddonEnabled = Config.Bind("9. Armageddon Mode", "Enabled", false,
                 "Enable Armageddon Mode. Hold the modifier key while firing for unlimited full-auto destruction (skips trees/logs)");
-            ArmageddonKey = Config.Bind("9. Armageddon Mode", "ArmageddonKey", KeyCode.LeftShift,
-                "Hold this key while firing to engage Armageddon Mode (only when Enabled)");
+            ArmageddonKey = Config.Bind("9. Armageddon Mode", "ArmageddonKey", KeyCode.LeftControl,
+                "Hold this key while firing to engage Armageddon Mode (only when Enabled). Default: LeftControl (crouch — keeps the upper-body cast overlay visible). LeftShift triggers vanilla sprint which suppresses the cast pose; LeftControl avoids that conflict.");
             ArmageddonAoeRadius = Config.Bind("9. Armageddon Mode", "AoeRadius", 10,
                 new ConfigDescription("Armageddon AOE radius in metres (overrides AOE Radius while modifier held)", new AcceptableValueRange<int>(0, 100)));
             ArmageddonRange = Config.Bind("9. Armageddon Mode", "Range", 500,
