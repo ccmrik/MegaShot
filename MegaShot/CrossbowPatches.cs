@@ -1675,6 +1675,22 @@ namespace MegaShot
                 // frame to exit before the next pulse, so input always has
                 // a window. Falls back to 100 ms (Normal/Alt-safe) until
                 // the first measurement succeeds.
+                //
+                // Critical layer-weight override: `staff_rapidfire` plays on
+                // animator layer 1 (upper-body overlay). Vanilla drops that
+                // layer's weight to 0 while sprinting — and `ArmageddonKey`
+                // defaults to LeftShift which IS Valheim's sprint key. So
+                // without forcing the layer weight back to 1, the cast
+                // animation triggers correctly but is invisible. Force it
+                // every frame while LMB is held so our overlay shows on top
+                // of whatever full-body pose vanilla is running.
+                try
+                {
+                    if (cachedAnimator != null && cachedAnimator.layerCount > 1)
+                        cachedAnimator.SetLayerWeight(1, 1f);
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+
                 try
                 {
                     var atk = weapon?.m_shared?.m_attack;

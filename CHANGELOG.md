@@ -5,6 +5,21 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.36] - 2026-04-30
+
+### Fixed
+- **Armageddon body animation invisible.** v2.6.35's runtime clip-length measurement worked perfectly (`staff_rapidfire` measured at 0.4667s on **layer 1**, throttle pulses correctly at ~500 ms intervals — only 14 SetTrigger calls in a full session log vs 1209 in v2.6.33's locked build). The cast was being driven correctly but never showed up because:
+  - `staff_rapidfire` plays on animator **layer 1** (upper-body overlay).
+  - `ArmageddonKey` defaults to **LeftShift**, which is also Valheim's sprint key.
+  - Vanilla drops layer 1's weight to 0 while sprinting (you can't sustain an upper-body cast pose while sprint-bracing).
+  - So the trigger fired correctly but the layer that played it had zero weight — animation was fully invisible.
+
+### Changed
+- `UpdateArmageddonBeam` now forces `cachedAnimator.SetLayerWeight(1, 1f)` every frame while LMB is held in Armageddon mode. Overrides vanilla's sprint-driven layer-weight clamp so the rapid-fire cast pose shows on top of the run animation. Cast is visible regardless of movement state.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs`
+
 ## [2.6.35] - 2026-04-30
 
 ### Added
