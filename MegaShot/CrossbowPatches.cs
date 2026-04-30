@@ -287,6 +287,9 @@ namespace MegaShot
     }
 
     // Block vanilla attack - we handle firing ourselves (Humanoid.StartAttack - try-catch)
+    // EXCEPTION: when we're explicitly invoking vanilla for animation purposes
+    // (PulseFiringAnimation flips `_vanillaStartAttackAllowed` to true), let it
+    // through so vanilla does the proper animator setup.
     [HarmonyPatch(typeof(Humanoid), "StartAttack")]
     public static class PatchBlockVanillaAttack
     {
@@ -298,9 +301,36 @@ namespace MegaShot
                 if (__instance != Player.m_localPlayer) return true;
                 var weapon = __instance.GetCurrentWeapon();
                 if (weapon != null && CrossbowHelper.IsCrossbow(weapon))
+                {
+                    // Allow our induced StartAttack call through.
+                    if (PatchPlayerUpdate._vanillaStartAttackAllowed) return true;
                     return false;
+                }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+            return true;
+        }
+    }
+
+    // Suppress vanilla's projectile spawn that fires off the cast animation's
+    // event. We want vanilla's animator setup (StartAttack) but NOT vanilla's
+    // Dundr bolt — our FireBolt handles the actual projectile with the right
+    // velocity / damage / AOE. The flag is set by PulseFiringAnimation only
+    // during the StartAttack call window; legitimate vanilla attack triggers
+    // (which never reach a crossbow weapon anyway since Block returns false)
+    // pass through unaffected.
+    [HarmonyPatch(typeof(Attack), "OnAttackTrigger")]
+    public static class PatchSuppressVanillaProjectile
+    {
+        public static bool Prefix()
+        {
+            // Only suppress when we're inside our induced StartAttack window —
+            // the flag is set by PulseFiringAnimation just before calling
+            // vanilla StartAttack, and cleared right after. Outside that
+            // window the flag is false and vanilla animation events run
+            // normally for everything else.
+            if (!MegaShotPlugin.ModEnabled.Value) return true;
+            if (PatchPlayerUpdate._suppressVanillaProjectile) return false;
             return true;
         }
     }
@@ -481,11 +511,7 @@ namespace MegaShot
         // Fire timing
         private static float lastFireTime = 0f;
 
-        // Cached reflection for animation (VERIFIED: m_zanim + SetTrigger)
-        private static FieldInfo zanimField;
-        private static bool zanimFieldCached = false;
-
-        // Cached animator for speed control
+        // Cached animator for speed control / idle reset.
         private static Animator cachedAnimator;
 
         // Cached audio for reliable sound per shot
@@ -1816,96 +1842,84 @@ namespace MegaShot
             }
         }
 
-        // Pulses the player's firing animation. Used by both per-shot fire
-        // (each FireBolt call) and the Armageddon laser (each frame the beam
-        // is firing) so Dundr's cast pose plays for every shot and streams
-        // continuously while LMB is held in laser mode.
+        // Pulses the player's firing animation by routing through vanilla
+        // `Humanoid.StartAttack` — the only path that does ALL the animator
+        // setup vanilla relies on (m_currentAttack assignment, animator BOOLs,
+        // animation event hookup, ZSyncAnimation triggers, etc.). Manual
+        // SetTrigger-only attempts (v2.6.27) and CrossFade-every-frame
+        // attempts (v2.6.28) both failed: SetTrigger alone didn't satisfy
+        // the controller's transition gates, and CrossFade-every-frame froze
+        // the animator on frame 0 and clobbered other animations sharing
+        // the same animator.
         //
-        // v2.6.27 used SetTrigger only — log confirmed the trigger
-        // (`staff_lightningshot`) fired every shot but NO visible animation.
-        // The animator's transition condition into the cast state evidently
-        // wasn't satisfied (probably gated on `m_currentAttack != null` or
-        // a similar BOOL that vanilla's `Attack.Start` sets).
+        // We toggle a flag that lets PatchBlockVanillaAttack pass through
+        // (it normally returns false to suppress vanilla auto-firing on
+        // mouse click). Vanilla rate-limits StartAttack via `m_currentAttack`
+        // — we clear it via reflection before each call so high fire rates
+        // can keep retriggering.
         //
-        // v2.6.28 takes a more direct route: search every animator layer for
-        // a state whose name matches `m_attackAnimation` and CrossFade into
-        // it. CrossFade bypasses transition conditions entirely — if the
-        // state exists it plays. SetTrigger is also called for ZSyncAnimation
-        // network sync (so other players see the cast).
-        //
-        // Diagnostic logs which path produced output (or whether the state
-        // wasn't found in any layer) so we can iterate without re-spinning.
-        private static int cachedAttackStateHash = 0;
-        private static int cachedAttackStateLayer = -1;
-        private static string cachedAttackStateName = null;
+        // Vanilla projectile spawn happens later via the animation's event
+        // callback. To prevent a duplicate of our manually-fired projectile,
+        // we null `m_attackProjectile` for the duration of the StartAttack
+        // call. The animation event reads `attack.m_attackProjectile` when
+        // it fires (which can be after we've restored it), so we also patch
+        // `Attack.OnAttackTrigger` to short-circuit when the firing flag
+        // hasn't been set by us — i.e. the legitimate vanilla path is fine,
+        // but our induced StartAttack call won't double-fire a Dundr bolt.
+        internal static bool _vanillaStartAttackAllowed = false;
+        internal static bool _suppressVanillaProjectile = false;
+        private static FieldInfo _currentAttackField;
+        private static FieldInfo _previousAttackField;
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
             try
             {
-                if (!zanimFieldCached)
-                {
-                    zanimField = typeof(Character).GetField("m_zanim", BindingFlags.NonPublic | BindingFlags.Instance);
-                    zanimFieldCached = true;
-                }
                 if (cachedAnimator == null)
                     cachedAnimator = player.GetComponentInChildren<Animator>();
                 if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
                     cachedAnimator.speed = 1f;
 
-                string animName = attack.m_attackAnimation;
-                if (string.IsNullOrEmpty(animName))
+                if (_currentAttackField == null)
+                    _currentAttackField = typeof(Humanoid).GetField("m_currentAttack",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (_previousAttackField == null)
+                    _previousAttackField = typeof(Humanoid).GetField("m_previousAttack",
+                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+
+                // Clear m_currentAttack so vanilla rate-limit doesn't reject us.
+                try { _currentAttackField?.SetValue(player, null); } catch { }
+                try { _previousAttackField?.SetValue(player, null); } catch { }
+
+                // Null the weapon's m_attackProjectile across the StartAttack
+                // call. Vanilla constructs its Attack instance by cloning from
+                // the weapon template — that clone snapshots the projectile
+                // field at construction. With it null at clone time, vanilla's
+                // animation-event fire-projectile callback reads null on the
+                // clone and skips the spawn. We restore the original on the
+                // weapon template right after, so our FireBolt's prefab lookup
+                // (which runs every shot) keeps working for the manual spawn.
+                var weaponAttack = player.GetCurrentWeapon()?.m_shared?.m_attack;
+                GameObject savedProjectile = null;
+                if (weaponAttack != null)
                 {
+                    savedProjectile = weaponAttack.m_attackProjectile;
+                    weaponAttack.m_attackProjectile = null;
+                }
+
+                _vanillaStartAttackAllowed = true;
+                _suppressVanillaProjectile = true;
+                try
+                {
+                    player.StartAttack(null, false);
                     if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                        DiagnosticHelper.Log("ANIM: skipped — empty attack.m_attackAnimation");
-                    return;
+                        DiagnosticHelper.Log("ANIM: vanilla StartAttack invoked (anim='" + (attack.m_attackAnimation ?? "<null>") + "')");
                 }
-
-                // CrossFade directly into the state — bypasses transition gates.
-                if (cachedAnimator != null)
+                finally
                 {
-                    // Cache the layer once: walking every layer per shot is wasteful.
-                    if (cachedAttackStateName != animName)
-                    {
-                        cachedAttackStateName = animName;
-                        cachedAttackStateHash = Animator.StringToHash(animName);
-                        cachedAttackStateLayer = -1;
-                        for (int layer = 0; layer < cachedAnimator.layerCount; layer++)
-                        {
-                            if (cachedAnimator.HasState(layer, cachedAttackStateHash))
-                            {
-                                cachedAttackStateLayer = layer;
-                                break;
-                            }
-                        }
-                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                            DiagnosticHelper.Log("ANIM: cached state '" + animName + "' hash=" + cachedAttackStateHash + " layer=" + cachedAttackStateLayer + " (layerCount=" + cachedAnimator.layerCount + ")");
-                    }
-
-                    if (cachedAttackStateLayer >= 0)
-                    {
-                        // Fixed-time crossfade — 0.05 s blend, normalized time 0,
-                        // fixed-time offset 0. Makes the state RESTART each call,
-                        // which is what we want for repeated shots / the laser stream.
-                        cachedAnimator.CrossFadeInFixedTime(cachedAttackStateHash, 0.05f, cachedAttackStateLayer, 0f, 0f);
-                    }
-                    else if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                    {
-                        DiagnosticHelper.Log("ANIM: state '" + animName + "' not found in any animator layer — falling back to SetTrigger only");
-                    }
-                }
-
-                // SetTrigger via ZSyncAnimation for network replication
-                // (other players see the cast pose via this RPC).
-                if (zanimField != null)
-                {
-                    var zanim = zanimField.GetValue(player) as ZSyncAnimation;
-                    if (zanim != null)
-                    {
-                        zanim.SetTrigger(animName);
-                        if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
-                            DiagnosticHelper.Log("ANIM: SetTrigger('" + animName + "') + CrossFade(layer=" + cachedAttackStateLayer + ")");
-                    }
+                    _vanillaStartAttackAllowed = false;
+                    _suppressVanillaProjectile = false;
+                    if (weaponAttack != null) weaponAttack.m_attackProjectile = savedProjectile;
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }

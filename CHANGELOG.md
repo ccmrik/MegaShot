@@ -5,6 +5,23 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.29] - 2026-04-30
+
+### Fixed
+- **Firing animation finally driven through vanilla `Humanoid.StartAttack`.** v2.6.27 (SetTrigger only) confirmed via DebugMode that the trigger fired but the controller transition never took. v2.6.28 (CrossFadeInFixedTime every frame) made it worse — restarting the state from frame 0 every frame froze the animator and clobbered animations of other weapons sharing it. Both reverted. Now `PulseFiringAnimation`:
+  1. Clears `m_currentAttack` / `m_previousAttack` via reflection so vanilla rate-limit accepts back-to-back calls.
+  2. Temporarily nulls `weapon.m_attack.m_attackProjectile` so the Attack instance vanilla constructs has no projectile to fire on its animation event (preventing duplicate Dundr bolts on top of our manual `FireBolt` spawn).
+  3. Toggles `_vanillaStartAttackAllowed` and calls `player.StartAttack(null, false)` — vanilla does the full animator setup (m_currentAttack assignment, animator BOOLs, ZSyncAnimation, etc.) which manual SetTrigger / CrossFade alone couldn't reproduce.
+  4. Restores `m_attackProjectile` after the call so the next `FireBolt` still finds the prefab.
+
+### Notes
+- Per-shot (Normal + Alt fire): one induced StartAttack per shot → vanilla cast plays.
+- Armageddon laser: induced StartAttack every frame while LMB is held → continuous looped cast pose.
+- New patch: `Attack.OnAttackTrigger` Prefix returns false during the suppression window so even if the projectile spawn somehow runs synchronously, it short-circuits.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs` — `PulseFiringAnimation` rewritten around vanilla StartAttack invocation. `PatchBlockVanillaAttack` now lets the call through when `_vanillaStartAttackAllowed` is set. New `PatchSuppressVanillaProjectile` on `Attack.OnAttackTrigger`. Removed unused `zanimField` / `zanimFieldCached`.
+
 ## [2.6.28] - 2026-04-30
 
 ### Fixed
