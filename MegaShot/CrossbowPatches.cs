@@ -1853,16 +1853,16 @@ namespace MegaShot
         // ReleaseFiringAnimation is now a no-op stub kept for call-site
         // compatibility — there's no BOOL to clear.
 
-        // v2.6.41 — fire BOTH ZSyncAnimation.SetTrigger AND direct
-        // Animator.SetTrigger, force layer 1 weight every call, pull the
-        // animator from ZSyncAnimation.m_animator (the canonical TopAnimator
-        // vanilla uses) instead of GetComponentInChildren which can grab a
-        // wrong child rig. Plus a one-shot animator-state dump on first
-        // pulse (DebugMode only) so we can see what state the animator is
-        // actually in when triggers are firing — v2.6.40 fired 420
-        // SetTriggers with no visible animation, so the diagnostic tells
-        // us whether layer 1 weight is 0, the animator is in a state
-        // without a transition into rapidfire, or some other gate.
+        // v2.6.42 — REVERT v2.6.41's direct Animator.SetTrigger (the lockup
+        // vector — bypassed ZSync's gate-keeping and parked the animator
+        // permanently in attack state, closing input gates). Back to
+        // zanim.SetTrigger only, plus a much beefier one-shot diagnostic so
+        // we can see WHY the trigger isn't visibly transitioning even
+        // though the animator is correct (Visual rig, layer 1 weight = 1).
+        // The expanded dump prints clip names per layer, every animator
+        // parameter (name + type + value), and known-trigger hash matches
+        // — that should reveal the actual gate (likely a weapon-state int
+        // parameter that needs to be in the staff value, not crossbow).
         private static FieldInfo _zanimAnimatorField;
         private static bool _zanimAnimatorFieldCached = false;
         private static bool _animDiagDumped = false;
@@ -1899,8 +1899,11 @@ namespace MegaShot
                 string trig = attack.m_attackAnimation;
                 if (string.IsNullOrEmpty(trig)) return;
 
+                // ZSyncAnimation.SetTrigger ONLY — no direct cachedAnimator.SetTrigger.
+                // The direct call bypassed ZSync's per-frame gate-keeping in
+                // v2.6.41 and re-introduced the input-lock that v2.6.39
+                // emergency-reverted.
                 zanim.SetTrigger(trig);
-                if (cachedAnimator != null) cachedAnimator.SetTrigger(trig);
 
                 if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
                 {
@@ -1908,22 +1911,93 @@ namespace MegaShot
                     if (!_animDiagDumped && cachedAnimator != null)
                     {
                         _animDiagDumped = true;
-                        try
-                        {
-                            DiagnosticHelper.Log("ANIM-DIAG: animator=" + cachedAnimator.name + " layers=" + cachedAnimator.layerCount);
-                            for (int i = 0; i < cachedAnimator.layerCount; i++)
-                            {
-                                var s = cachedAnimator.GetCurrentAnimatorStateInfo(i);
-                                DiagnosticHelper.Log("ANIM-DIAG: layer=" + i + " weight=" + cachedAnimator.GetLayerWeight(i)
-                                    + " stateHash=" + s.fullPathHash + " shortHash=" + s.shortNameHash
-                                    + " len=" + s.length + " norm=" + s.normalizedTime);
-                            }
-                        }
+                        try { AnimatorDeepDiag(cachedAnimator, trig); }
                         catch (Exception ex2) { DiagnosticHelper.LogException("MegaShot", ex2); }
                     }
                 }
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+
+        // One-shot deep diagnostic — fires once on first DebugMode pulse.
+        // Prints animator name, every layer's current clip name + state hash
+        // + weight + normalized time, every parameter name+type+value, and
+        // hash matches for likely candidate state names. The goal: spot
+        // which parameter (probably an int weapon-state) is parking the
+        // animator in a sub-tree that has no transition into staff_rapidfire.
+        private static void AnimatorDeepDiag(Animator a, string ourTrigger)
+        {
+            DiagnosticHelper.Log("ANIM-DIAG: animator=" + a.name + " layers=" + a.layerCount + " parameterCount=" + a.parameterCount);
+
+            // Per-layer state + clip
+            for (int i = 0; i < a.layerCount; i++)
+            {
+                var s = a.GetCurrentAnimatorStateInfo(i);
+                string clipNames = "(none)";
+                try
+                {
+                    var clips = a.GetCurrentAnimatorClipInfo(i);
+                    if (clips != null && clips.Length > 0)
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        for (int k = 0; k < clips.Length; k++)
+                        {
+                            if (k > 0) sb.Append(",");
+                            sb.Append(clips[k].clip != null ? clips[k].clip.name : "?");
+                            sb.Append("@").Append(clips[k].weight.ToString("0.00"));
+                        }
+                        clipNames = sb.ToString();
+                    }
+                }
+                catch { }
+                DiagnosticHelper.Log("ANIM-DIAG: layer=" + i
+                    + " name=" + a.GetLayerName(i)
+                    + " weight=" + a.GetLayerWeight(i)
+                    + " stateHash=" + s.fullPathHash
+                    + " shortHash=" + s.shortNameHash
+                    + " norm=" + s.normalizedTime
+                    + " len=" + s.length
+                    + " inTransition=" + a.IsInTransition(i)
+                    + " clips=[" + clipNames + "]");
+            }
+
+            // Hash matches against likely candidates
+            string[] candidates = new[] {
+                "staff_rapidfire", "staff_lightningshot", "staff_charge_attack",
+                "staff_fireball0", "staff_fireball1",
+                "bow_fire", "crossbow_fire", "crossbow_aim", "crossbow_load",
+                "Idle", "idle",
+                "staff_hold", "staff_idle", "Hold", "MovementHold",
+                "Crossbow", "Bow", "Staff", "RH_Idle"
+            };
+            int curShort0 = a.GetCurrentAnimatorStateInfo(0).shortNameHash;
+            int curShort1 = a.layerCount > 1 ? a.GetCurrentAnimatorStateInfo(1).shortNameHash : 0;
+            for (int c = 0; c < candidates.Length; c++)
+            {
+                int h = Animator.StringToHash(candidates[c]);
+                string mark = (h == curShort0) ? " <-L0" : (h == curShort1) ? " <-L1" : "";
+                if (h == curShort0 || h == curShort1)
+                    DiagnosticHelper.Log("ANIM-DIAG: HASH " + candidates[c] + "=" + h + mark);
+            }
+
+            // All animator parameters: name, type, current value
+            for (int p = 0; p < a.parameterCount; p++)
+            {
+                var par = a.GetParameter(p);
+                string val = "?";
+                try
+                {
+                    switch (par.type)
+                    {
+                        case AnimatorControllerParameterType.Bool:    val = a.GetBool(par.nameHash) ? "true" : "false"; break;
+                        case AnimatorControllerParameterType.Float:   val = a.GetFloat(par.nameHash).ToString("0.000"); break;
+                        case AnimatorControllerParameterType.Int:     val = a.GetInteger(par.nameHash).ToString(); break;
+                        case AnimatorControllerParameterType.Trigger: val = "(trig)"; break;
+                    }
+                }
+                catch { }
+                DiagnosticHelper.Log("ANIM-DIAG: param[" + p + "] " + par.type + " '" + par.name + "'=" + val);
+            }
         }
 
         // Stub — kept for call-site compatibility. v2.6.32's staff_charging
