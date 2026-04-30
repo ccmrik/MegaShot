@@ -3596,6 +3596,26 @@ namespace MegaShot
             return UnityEngine.Time.time - lastMineRockKillTime <= MineRockWindowSec;
         }
 
+        // Player-pickup grace: when the player harvests a Pickable (e.g.
+        // Pickable_Grausten in Ashlands), vanilla spawns an ItemDrop whose
+        // m_shared.m_name matches our junk list ("$item_grausten"). If the
+        // beam fired <15 s ago OR a MineRock died recently, the suppression
+        // postfix would otherwise eat that drop and the player gets nothing.
+        // Stamping a short grace window from Pickable.Interact lets us tell
+        // player-initiated drops apart from beam-cascade drops.
+        private const float PickableGraceSec = 1.5f;
+        private static float lastPickableInteractTime = -999f;
+
+        public static void MarkPlayerPickable()
+        {
+            lastPickableInteractTime = UnityEngine.Time.time;
+        }
+
+        public static bool IsPickableGraceOpen()
+        {
+            return UnityEngine.Time.time - lastPickableInteractTime <= PickableGraceSec;
+        }
+
         public static void MarkBeamActive()
         {
             lastBeamActiveTime = UnityEngine.Time.time;
@@ -3766,6 +3786,12 @@ namespace MegaShot
                 // cascading deferred-destroy spawns.
                 if (!ArmageddonSuppression.ShouldSuppressDropsNow()) return;
 
+                // Player-pickup grace overrides suppression. Pickable.Interact
+                // (Pickable_Grausten, Pickable_Tin, etc.) spawns drops whose
+                // item name collides with the junk list — without this gate
+                // every Pickable harvest within 15 s of a beam shot vanishes.
+                if (ArmageddonSuppression.IsPickableGraceOpen()) return;
+
                 bool isJunk = ArmageddonSuppression.IsJunkItem(__instance);
 
                 // Diagnostic: log every drop we see while the gate is open
@@ -3783,6 +3809,25 @@ namespace MegaShot
 
                 if (!isJunk) return;
                 ArmageddonSuppression.TryDestroyDrop(__instance);
+            }
+            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+        }
+    }
+
+    // Stamp the player-pickup grace whenever a Pickable is harvested.
+    // Without this the suppression Postfix above eats $item_grausten /
+    // $item_stone / etc. drops that came from a Pickable_* node the player
+    // explicitly interacted with — see ticket 20260429-214614-7446dec4.
+    [HarmonyPatch(typeof(Pickable), nameof(Pickable.Interact))]
+    public static class PatchPickableMarkInteract
+    {
+        public static void Prefix(Humanoid character, bool repeat)
+        {
+            try
+            {
+                if (repeat) return;
+                if (character == null || !character.IsPlayer()) return;
+                ArmageddonSuppression.MarkPlayerPickable();
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }

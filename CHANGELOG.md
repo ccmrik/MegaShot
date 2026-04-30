@@ -5,6 +5,17 @@ All notable changes to MegaShot will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.50] - 2026-05-01
+
+### Fixed (urgent)
+- **Pickable_Grausten harvests vanished when the Armageddon beam had fired in the last 15 s.** Armageddon's drop-suppression Postfix on `ItemDrop.Awake` matches every drop whose `m_shared.m_name` is in the Tier 1 junk list (`$item_grausten`, `$item_stone`, `$item_wood`, `$item_resin`). That list is correct for cascading MineRock5 drops, but it also matched ItemDrops spawned by player-initiated `Pickable.Interact` — Pickable_Grausten in Ashlands, Pickable_Tin in Black Forest, etc. — so any node the player walked up to and harvested during the suppression window disappeared on spawn with no Grausten in inventory. Reported by Milord in MegaBugs ticket `20260429-214614-7446dec4`.
+- Added `ArmageddonSuppression.MarkPlayerPickable()` + a 1.5 s `IsPickableGraceOpen()` window stamped from a new `[HarmonyPatch(typeof(Pickable), nameof(Pickable.Interact))]` Prefix. The suppression Postfix now bails early if the grace is open, so player-driven Pickable harvests are spared even when the beam-recent / MineRock-recent gate is otherwise active.
+
+### Files touched
+- `MegaShot/CrossbowPatches.cs`
+- `MegaShot/MegaShotPlugin.cs` (PluginVersion → 2.6.50)
+- `MegaShot/MegaShot.csproj` (`<Version>` → 2.6.50)
+
 ## [2.6.38] - 2026-04-30
 
 ### Fixed (urgent)
