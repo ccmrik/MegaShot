@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "Mega Shot";
-        public const string PluginVersion = "2.6.43";
+        public const string PluginVersion = "2.6.44";
 
         // General
         public static ConfigEntry<bool> ModEnabled;

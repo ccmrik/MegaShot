@@ -649,6 +649,9 @@ namespace MegaShot
                 StopArmageddonLaser();
                 StopArmageddonBeam();
                 ReleaseFiringAnimation(__instance);
+                // Belt-and-braces: clear bow_aim if we set it via PulseFiringAnimation
+                // and the player has since switched to a non-MegaShot weapon.
+                try { if (cachedAnimator != null) cachedAnimator.SetBool("bow_aim", false); } catch { }
                 return;
             }
 
@@ -746,14 +749,19 @@ namespace MegaShot
                 {
                     // Idle path — defensive: clear any stale animator-speed
                     // boost left over from previous MegaShot versions, and
-                    // release the staff_charging BOOL so the player returns
-                    // to neutral pose when LMB is released.
+                    // release bow_aim so the player isn't permanently in
+                    // aim stance after MegaShot fires (v2.6.44 sets it true
+                    // to gate the crossbow_fire transition).
                     try
                     {
                         if (cachedAnimator == null)
                             cachedAnimator = __instance.GetComponentInChildren<Animator>();
-                        if (cachedAnimator != null && Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
-                            cachedAnimator.speed = 1f;
+                        if (cachedAnimator != null)
+                        {
+                            if (Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
+                                cachedAnimator.speed = 1f;
+                            try { cachedAnimator.SetBool("bow_aim", false); } catch { }
+                        }
                     }
                     catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                     ReleaseFiringAnimation(__instance);
@@ -1869,6 +1877,17 @@ namespace MegaShot
         private static FieldInfo _zanimAnimatorField;
         private static bool _zanimAnimatorFieldCached = false;
         private static bool _animDiagDumped = false;
+        private static int _animProbeCounter = 0;
+        private static string ProbeFirstClipName(Animator a, int layer)
+        {
+            try
+            {
+                var clips = a.GetCurrentAnimatorClipInfo(layer);
+                if (clips == null || clips.Length == 0) return "(empty)";
+                return clips[0].clip != null ? clips[0].clip.name : "?";
+            }
+            catch { return "(err)"; }
+        }
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
@@ -1902,6 +1921,20 @@ namespace MegaShot
                 string trig = attack.m_attackAnimation;
                 if (string.IsNullOrEmpty(trig)) return;
 
+                // v2.6.44: set bow_aim = true as a prerequisite. Vanilla
+                // crossbow_fire (and bow_fire) transitions are gated on
+                // bow_aim=true — the animator routes through an aim
+                // sub-state. With bow_aim=false (the default while just
+                // holding the weapon), the trigger has no valid transition
+                // out of CrossbowWalk/CrossbowIdle and gets silently
+                // consumed. Setting bow_aim=true puts the animator into
+                // the aim state and the next trigger fires the cast.
+                if (cachedAnimator != null)
+                {
+                    try { cachedAnimator.SetBool("bow_aim", true); }
+                    catch (Exception ex2) { DiagnosticHelper.LogException("MegaShot", ex2); }
+                }
+
                 // ZSyncAnimation.SetTrigger ONLY — no direct cachedAnimator.SetTrigger.
                 // The direct call bypassed ZSync's per-frame gate-keeping in
                 // v2.6.41 and re-introduced the input-lock that v2.6.39
@@ -1910,11 +1943,26 @@ namespace MegaShot
 
                 if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
                 {
-                    DiagnosticHelper.Log("ANIM: SetTrigger('" + trig + "')");
+                    DiagnosticHelper.Log("ANIM: SetTrigger('" + trig + "') bow_aim=true");
                     if (!_animDiagDumped && cachedAnimator != null)
                     {
                         _animDiagDumped = true;
                         try { AnimatorDeepDiag(cachedAnimator, trig); }
+                        catch (Exception ex2) { DiagnosticHelper.LogException("MegaShot", ex2); }
+                    }
+                    // Compact post-trigger probe: log layer 0 + 1 clip names
+                    // every 30th pulse so we can see if the transition ever
+                    // takes effect after we set bow_aim=true.
+                    _animProbeCounter++;
+                    if (_animProbeCounter >= 30 && cachedAnimator != null)
+                    {
+                        _animProbeCounter = 0;
+                        try
+                        {
+                            string l0 = ProbeFirstClipName(cachedAnimator, 0);
+                            string l1 = cachedAnimator.layerCount > 1 ? ProbeFirstClipName(cachedAnimator, 1) : "(no L1)";
+                            DiagnosticHelper.Log("ANIM-PROBE: L0=" + l0 + " L1=" + l1 + " bow_aim=" + cachedAnimator.GetBool("bow_aim"));
+                        }
                         catch (Exception ex2) { DiagnosticHelper.LogException("MegaShot", ex2); }
                     }
                 }

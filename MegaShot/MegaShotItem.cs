@@ -162,18 +162,39 @@ namespace MegaShot
         {
             try
             {
-                // Find Dundr (StaffLightning) prefab
+                // Find Dundr (StaffLightning) prefab — and probe vanilla
+                // CrossbowArbalest in the same loop so we can copy its
+                // exact firing-animation trigger (instead of guessing).
                 GameObject dundrPrefab = null;
+                GameObject crossbowArbalestPrefab = null;
                 foreach (var prefab in objectDB.m_items)
                 {
                     if (prefab == null) continue;
-                    if (prefab.name == "StaffLightning")
-                    {
-                        dundrPrefab = prefab;
-                        break;
-                    }
+                    if (prefab.name == "StaffLightning") dundrPrefab = prefab;
+                    else if (prefab.name == "CrossbowArbalest") crossbowArbalestPrefab = prefab;
+                    if (dundrPrefab != null && crossbowArbalestPrefab != null) break;
                 }
                 if (dundrPrefab == null) return;
+
+                // Probe CrossbowArbalest's actual attack-animation trigger.
+                // v2.6.43 used the param name "crossbow_fire" but the
+                // animator state machine has no transition arc for that
+                // from CrossbowWalk/CrossbowIdle states. Whatever vanilla
+                // uses MUST work, so just copy it.
+                string vanillaCrossbowTrigger = null;
+                try
+                {
+                    if (crossbowArbalestPrefab != null)
+                    {
+                        var caShared = crossbowArbalestPrefab.GetComponent<ItemDrop>()?.m_itemData?.m_shared;
+                        if (caShared?.m_attack != null)
+                        {
+                            vanillaCrossbowTrigger = caShared.m_attack.m_attackAnimation;
+                            MegaShotLog.Debug("Probed CrossbowArbalest m_attackAnimation = '" + vanillaCrossbowTrigger + "' attackType=" + caShared.m_attack.m_attackType);
+                        }
+                    }
+                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
                 // Inactive container pattern: parent the clone under an inactive root GO.
                 // The clone keeps activeSelf=true but activeInHierarchy=false,
@@ -244,8 +265,25 @@ namespace MegaShot
                 // the player is already in.
                 try
                 {
-                    shared.m_attack.m_attackAnimation = "crossbow_fire";
-                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> crossbow_fire");
+                    // v2.6.44: use whatever trigger vanilla CrossbowArbalest uses.
+                    // Falls back to "crossbow_fire" only if the probe failed.
+                    string trig = !string.IsNullOrEmpty(vanillaCrossbowTrigger) ? vanillaCrossbowTrigger : "crossbow_fire";
+                    shared.m_attack.m_attackAnimation = trig;
+                    // Also copy the attack TYPE - vanilla crossbow uses Projectile,
+                    // and the type drives some animator-state transitions vanilla
+                    // does behind the scenes (bow_aim Bool, etc.). Without this,
+                    // the trigger fires from a state that has no transition.
+                    if (crossbowArbalestPrefab != null)
+                    {
+                        var caShared = crossbowArbalestPrefab.GetComponent<ItemDrop>()?.m_itemData?.m_shared;
+                        if (caShared?.m_attack != null)
+                        {
+                            try { shared.m_attack.m_attackType = caShared.m_attack.m_attackType; } catch { }
+                            try { shared.m_attack.m_attackChainLevels = caShared.m_attack.m_attackChainLevels; } catch { }
+                            try { shared.m_attack.m_loopingAttack = caShared.m_attack.m_loopingAttack; } catch { }
+                        }
+                    }
+                    MegaShotLog.Debug("Override m_attack.m_attackAnimation -> " + trig);
                 }
                 catch (Exception ex) { DiagnosticHelper.LogException("MegaShotItem", ex); }
 
