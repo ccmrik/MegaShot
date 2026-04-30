@@ -3559,6 +3559,7 @@ namespace MegaShot
             "$item_stone",
             "$item_wood",
             "$item_grausten",
+            "$item_resin",
         };
 
         // Prefix matches (case-insensitive) on the dropped GameObject's
@@ -3572,6 +3573,7 @@ namespace MegaShot
             "stone",
             "wood",
             "grausten",
+            "resin",
         };
 
         // Independent secondary gate: if a MineRock/MineRock5 was destroyed

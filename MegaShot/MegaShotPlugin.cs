@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "Mega Shot";
-        public const string PluginVersion = "2.6.47";
+        public const string PluginVersion = "2.6.48";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -157,7 +157,7 @@ namespace MegaShot
             // suppression all stay in one path. Spares trees and logs as before.
             ArmageddonEnabled = Config.Bind("9. Armageddon Mode", "Enabled", false,
                 "Enable Armageddon Mode. Hold the modifier key while firing for unlimited full-auto destruction (skips trees/logs)");
-            ArmageddonKey = Config.Bind("9. Armageddon Mode", "ArmageddonKey", KeyCode.LeftControl,
+            ArmageddonKey = Config.Bind("9. Armageddon Mode", "ArmageddonKey", KeyCode.LeftShift,
                 "Primary modifier — hold while firing to engage Armageddon Mode. Set to None to disable.");
             ArmageddonKey2 = Config.Bind("9. Armageddon Mode", "ArmageddonKey2", KeyCode.Mouse4,
                 "Alternative modifier — held alongside or instead of ArmageddonKey. Mouse4 is the typical 'side button' mapping (Logitech G502 G4/G5/G6 land here if G HUB is set to send Mouse Button 4). Set to None to disable.");
