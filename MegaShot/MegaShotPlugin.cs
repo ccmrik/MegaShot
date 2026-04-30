@@ -13,7 +13,7 @@ namespace MegaShot
     {
         public const string PluginGUID = "com.rikal.megashot";
         public const string PluginName = "Mega Shot";
-        public const string PluginVersion = "2.6.44";
+        public const string PluginVersion = "2.6.45";
 
         // General
         public static ConfigEntry<bool> ModEnabled;
@@ -62,10 +62,8 @@ namespace MegaShot
         // Armageddon Mode
         public static ConfigEntry<bool> ArmageddonEnabled;
         public static ConfigEntry<KeyCode> ArmageddonKey;
+        public static ConfigEntry<int> ArmageddonFireRate;
         public static ConfigEntry<int> ArmageddonAoeRadius;
-        public static ConfigEntry<int> ArmageddonRange;
-        public static ConfigEntry<bool> ArmageddonLaserSound;
-        public static ConfigEntry<int> ArmageddonLaserVolume;
         public static ConfigEntry<bool> ArmageddonSuppressDrops;
         public static ConfigEntry<bool> ArmageddonSuppressFx;
 
@@ -150,25 +148,23 @@ namespace MegaShot
             HouseFireEnabled = Config.Bind("8. HouseFire", "Enabled", false,
                 "Enable HouseFire spawning in ALT mode (set to false to disable fire on impact)");
 
-            // Armageddon Mode — full-auto destruction modifier (Shift by default).
-            // While the modifier is held: 100 rps fire rate, unlimited ammo, AOE 10,
-            // destroys rocks/saplings/ores/destructibles but spares trees and logs.
+            // Armageddon Mode — full-auto destruction modifier (LeftCtrl by default).
+            // While the modifier is held: bolts fire at ArmageddonFireRate (100 rps default),
+            // each carrying Armageddon damage tags. Damage / drops / FX still flow through
+            // the normal FireBolt + bolt-projectile pipeline so animation, hit logic, and
+            // suppression all stay in one path. Spares trees and logs as before.
             ArmageddonEnabled = Config.Bind("9. Armageddon Mode", "Enabled", false,
                 "Enable Armageddon Mode. Hold the modifier key while firing for unlimited full-auto destruction (skips trees/logs)");
             ArmageddonKey = Config.Bind("9. Armageddon Mode", "ArmageddonKey", KeyCode.LeftControl,
-                "Hold this key while firing to engage Armageddon Mode (only when Enabled). Default: LeftControl (crouch — keeps the upper-body cast overlay visible). LeftShift triggers vanilla sprint which suppresses the cast pose; LeftControl avoids that conflict.");
+                "Hold this key while firing to engage Armageddon Mode (only when Enabled).");
+            ArmageddonFireRate = Config.Bind("9. Armageddon Mode", "FireRate", 100,
+                new ConfigDescription("Bolts per second while Armageddon is held. Default 100. Each bolt carries the Armageddon damage tag.", new AcceptableValueRange<int>(1, 100)));
             ArmageddonAoeRadius = Config.Bind("9. Armageddon Mode", "AoeRadius", 10,
                 new ConfigDescription("Armageddon AOE radius in metres (overrides AOE Radius while modifier held)", new AcceptableValueRange<int>(0, 100)));
-            ArmageddonRange = Config.Bind("9. Armageddon Mode", "Range", 500,
-                new ConfigDescription("Maximum Armageddon beam reach in metres", new AcceptableValueRange<int>(50, 1000)));
-            ArmageddonLaserSound = Config.Bind("9. Armageddon Mode", "LaserSound", true,
-                "Play a continuous laser-beam hum while firing in Armageddon Mode (replaces the per-shot bolt sound)");
-            ArmageddonLaserVolume = Config.Bind("9. Armageddon Mode", "LaserVolume", 60,
-                new ConfigDescription("Volume of the Armageddon laser hum as a percentage (0 = silent, 100 = max)", new AcceptableValueRange<int>(0, 100)));
             ArmageddonSuppressDrops = Config.Bind("9. Armageddon Mode", "SuppressDrops", true,
                 "Delete resource drops (stone, wood, flint, resin, etc.) spawned by objects destroyed in Armageddon Mode. They never hit the ground.");
             ArmageddonSuppressFx = Config.Bind("9. Armageddon Mode", "SuppressFx", true,
-                "Skip vanilla destroy/hit VFX while the beam is firing. Huge perf win in dense rock clusters with large AOE — the beam's own glow + impact flash do the visual work. Disable if you want individual per-rock dust puffs.");
+                "Skip vanilla destroy/hit VFX while Armageddon is firing. Huge perf win in dense rock clusters with large AOE.");
 
             // 99. Debug — standardised section + key across all Mega mods (v2.4.0+)
             DebugMode = Config.Bind("99. Debug", "DebugMode", false,
@@ -265,7 +261,8 @@ namespace MegaShot
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShotPlugin", ex); }
         }
 
-        public static float GetEffectiveFireRate() => (float)FireRate.Value;
+        public static float GetEffectiveFireRate() =>
+            IsArmageddonActive() ? (float)ArmageddonFireRate.Value : (float)FireRate.Value;
         public static float GetEffectiveVelocity() => Velocity.Value;
         public static int GetEffectiveMagazineCapacity() => MagazineCapacity.Value;
 

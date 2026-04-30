@@ -514,39 +514,12 @@ namespace MegaShot
         private static float lastSoundTime = 0f;
         private const float SOUND_THROTTLE_RATE = 12f;  // Max PlayOneShot events/sec for high fire rates
 
-        // Armageddon laser hum: looped procedural clip + dedicated AudioSource on the player
-        private static AudioSource laserAudioSource;
-        private static GameObject laserSourceOwner;
-        private static AudioClip laserClip;
-
-        // Armageddon beam: continuous LineRenderer from weapon origin to crosshair impact,
-        // ticking damage at a fixed 30 Hz. Replaces bolt spawning entirely
-        // while in Armageddon Mode — no projectiles, just the beam.
-        private static LineRenderer beamLine;
-        private static GameObject beamObj;
-        private static Material beamMaterial;
-        private static float lastBeamTickTime = 0f;
-        private static float beamPulsePhase = 0f;
-        private static float lastBeamHitTime = -999f;
-        // Beam ticks damage at a fixed constant rate now — FireRate is no longer
-        // the throttle. Frame-rate independent at a visually smooth cadence.
-        private const float BEAM_TICK_RATE = 30f;
-
-        // No animator-speed scaling — vanilla SetTrigger fires the cast at
-        // 1× and the trigger is re-asserted each shot/frame, so high fire
-        // rates loop naturally rather than compressing the clip.
-
-        // v2.6.43 — explicit 100 rps gate for Armageddon's animation pulse
-        // (Milord's spec: simulate FireRate=100 in normal mode, which
-        // produces a constant-beam look). 10 ms cadence. Per-frame spam was
-        // both too fast (>100 Hz at higher framerates) and FPS-coupled.
-        private static float _lastArmageddonAnimPulse = -999f;
-
-        // Beam particles: tiny glowing motes along the beam path so it reads as
-        // ionised energy rather than a solid line. World-space sim, short life,
-        // perpendicular drift. Hand-emitted each frame along the ray.
-        private static ParticleSystem beamParticles;
-        private static GameObject beamParticlesObj;
+        // v2.6.45: Armageddon now reuses the standard FireBolt path — gated
+        // by ArmageddonFireRate (default 100 rps) instead of a parallel beam
+        // pipeline. All custom beam machinery (LineRenderer, particles,
+        // looping laser hum, per-frame raycast, splash) deleted. Damage flows
+        // through the bolt projectile's normal hit pipeline carrying the
+        // existing Armageddon sentinels (m_chop=999998, m_backstabBonus=-7777).
 
         // HUD throttle
         private static float lastHudUpdate = 0f;
@@ -646,8 +619,6 @@ namespace MegaShot
                 // Reset audio cache when leaving crossbow
                 fireClipSearched = false;
                 cachedFireClip = null;
-                StopArmageddonLaser();
-                StopArmageddonBeam();
                 ReleaseFiringAnimation(__instance);
                 // Belt-and-braces: clear bow_aim if we set it via PulseFiringAnimation
                 // and the player has since switched to a non-MegaShot weapon.
@@ -674,8 +645,6 @@ namespace MegaShot
             {
                 if (zooming) ResetZoom();
                 CrossbowHUD.showScope = false;
-                StopArmageddonLaser();
-                StopArmageddonBeam();
                 ReleaseFiringAnimation(__instance);
                 try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
                 return;
@@ -700,87 +669,72 @@ namespace MegaShot
             }
 
             // === FIRE ===
-            // Armageddon mode (Shift held + enabled): continuous BEAM from the weapon to crosshair.
-            //   No bolts spawn; damage ticks at a fixed 30 Hz along the ray.
-            // Destroy mode (Alt held): semi-auto, one bolt per click
-            // Normal mode: full-auto while held at configured fire rate
+            // v2.6.45: single fire path. Armageddon, Destroy, and Normal all
+            // route through FireBolt. Each bolt carries its own per-mode tags
+            // (set inside FireBolt via the same IsArmageddonActive() / DestroyObjects
+            // checks). Difference between modes:
+            //   - Normal:     full-auto at FireRate, decrements magazine, reloads at 0.
+            //   - Destroy:    semi-auto (one bolt per click), no rate limit.
+            //   - Armageddon: full-auto at ArmageddonFireRate (default 100), unlimited ammo.
             bool armageddon = MegaShotPlugin.IsArmageddonActive();
+            bool destroyMode = !armageddon
+                && MegaShotPlugin.DestroyObjects.Value
+                && Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value);
 
-            if (armageddon)
+            // Stamp Armageddon-active timestamp for the drop suppressor (covers
+            // cascading AOE chains and MineRock5 sub-area fractures whose drops
+            // scatter past the raw bolt impact).
+            if (armageddon && Input.GetMouseButton(0))
+                ArmageddonSuppression.MarkBeamActive();
+
+            bool fireInput = destroyMode ? Input.GetMouseButtonDown(0) : Input.GetMouseButton(0);
+
+            if (fireInput)
             {
-                // Beam handles its own firing input + damage ticks + visual.
-                UpdateArmageddonBeam(__instance, weapon, Input.GetMouseButton(0));
+                if (!armageddon && state.magazineAmmo <= 0)
+                {
+                    state.isReloading = true;
+                    state.reloadStartTime = Time.time;
+                    __instance.Message(MessageHud.MessageType.Center, "<color=yellow>RELOADING</color>");
+                }
+                else if (destroyMode)
+                {
+                    // Semi-auto: one shot per click, no rate limiting.
+                    state.magazineAmmo--;
+                    FireBolt(__instance, weapon);
+                }
+                else
+                {
+                    // Full-auto: gated by GetEffectiveFireRate (Armageddon
+                    // mode returns ArmageddonFireRate; otherwise FireRate).
+                    float interval = 1f / MegaShotPlugin.GetEffectiveFireRate();
+                    if (Time.time - lastFireTime >= interval)
+                    {
+                        lastFireTime = Mathf.Max(lastFireTime + interval, Time.time - interval);
+                        if (!armageddon) state.magazineAmmo--; // Armageddon = unlimited.
+                        FireBolt(__instance, weapon);
+                    }
+                }
             }
             else
             {
-                StopArmageddonBeam();
-
-                bool destroyMode = MegaShotPlugin.DestroyObjects.Value &&
-                    Input.GetKey(MegaShotPlugin.DestroyObjectsKey.Value);
-                bool fireInput = destroyMode ? Input.GetMouseButtonDown(0) : Input.GetMouseButton(0);
-
-                if (fireInput)
+                // Idle path — release bow_aim so the player isn't permanently in
+                // aim stance after MegaShot fires (PulseFiringAnimation sets it
+                // true to gate the crossbow_fire transition).
+                try
                 {
-                    if (state.magazineAmmo <= 0)
+                    if (cachedAnimator == null)
+                        cachedAnimator = __instance.GetComponentInChildren<Animator>();
+                    if (cachedAnimator != null)
                     {
-                        state.isReloading = true;
-                        state.reloadStartTime = Time.time;
-                        __instance.Message(MessageHud.MessageType.Center, "<color=yellow>RELOADING</color>");
-                    }
-                    else if (destroyMode)
-                    {
-                        // Semi-auto: one shot per click, no rate limiting
-                        state.magazineAmmo--;
-                        FireBolt(__instance, weapon);
-                    }
-                    else
-                    {
-                        float interval = 1f / MegaShotPlugin.GetEffectiveFireRate();
-                        if (Time.time - lastFireTime >= interval)
-                        {
-                            // Additive timing to prevent drift, cap to prevent burst after pause
-                            lastFireTime = Mathf.Max(lastFireTime + interval, Time.time - interval);
-                            state.magazineAmmo--;
-                            FireBolt(__instance, weapon);
-                        }
+                        if (Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
+                            cachedAnimator.speed = 1f;
+                        try { cachedAnimator.SetBool("bow_aim", false); } catch { }
                     }
                 }
-                else
-                {
-                    // Idle path — defensive: clear any stale animator-speed
-                    // boost left over from previous MegaShot versions, and
-                    // release bow_aim so the player isn't permanently in
-                    // aim stance after MegaShot fires (v2.6.44 sets it true
-                    // to gate the crossbow_fire transition).
-                    try
-                    {
-                        if (cachedAnimator == null)
-                            cachedAnimator = __instance.GetComponentInChildren<Animator>();
-                        if (cachedAnimator != null)
-                        {
-                            if (Mathf.Abs(cachedAnimator.speed - 1f) > 0.01f)
-                                cachedAnimator.speed = 1f;
-                            try { cachedAnimator.SetBool("bow_aim", false); } catch { }
-                        }
-                    }
-                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-                    ReleaseFiringAnimation(__instance);
-                }
+                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
+                ReleaseFiringAnimation(__instance);
             }
-
-            // Armageddon laser hum: continuous loop while LMB held (independent of fire-rate gate)
-            try
-            {
-                bool laserShouldPlay = armageddon
-                    && MegaShotPlugin.ArmageddonLaserSound.Value
-                    && Input.GetMouseButton(0)
-                    && state.magazineAmmo > 0; // unlimited in armageddon, but defensive
-                if (laserShouldPlay)
-                    StartArmageddonLaser(__instance);
-                else
-                    StopArmageddonLaser();
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
             try { UpdateHUD(__instance, state); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
@@ -1255,21 +1209,16 @@ namespace MegaShot
             PulseFiringAnimation(player, attack);
 
             // 11. Adaptive sound system — two tiers based on fire rate:
-            //     ≤15 rps: per-shot effects (all 3 Valheim fallback attempts, like vanilla)
-            //     >15 rps: throttled overlapping PlayOneShot (~12/sec on one AudioSource)
+            //     ≤12 rps: per-shot effects (all 3 Valheim fallback attempts, like vanilla)
+            //     >12 rps: throttled overlapping PlayOneShot (~12/sec on one AudioSource)
             //     Overlapping one-shots naturally blend into continuous "brrrrt" fire sound.
             //     12 PlayOneShot/sec with a ~0.3-0.5s clip = ~4-6 overlapping voices = smooth.
             //
-            // Armageddon Mode (with LaserSound enabled) skips per-shot audio entirely —
-            // the looping laser hum on the player AudioSource provides the continuous beam SFX.
-            bool skipPerShotSound = armageddon && MegaShotPlugin.ArmageddonLaserSound.Value;
+            // v2.6.45: Armageddon's laser-hum loop is gone — it now uses the
+            // throttled bolt-fire SFX (which at 100 rps blends into a near-
+            // continuous brrrrt without needing a separate looping clip).
             try
             {
-                if (skipPerShotSound)
-                {
-                    // Armageddon laser hum handles audio in the Update loop — skip per-shot SFX.
-                }
-                else {
                 float fireRate = MegaShotPlugin.GetEffectiveFireRate();
 
                 // Ensure fire clip is always cached
@@ -1324,7 +1273,6 @@ namespace MegaShot
                         soundPlayed = TryInstantiateEffectPrefabs(attack, spawnPos, aimDir);
                     }
                 }
-                } // end else (per-shot sound block)
             }
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
 
@@ -1332,467 +1280,7 @@ namespace MegaShot
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
-        // ---- Sound Helpers ----
-
-        // ---- Armageddon laser hum ----
-        // Procedural sci-fi beam: layered sines (sub/carrier/harmonic) with vibrato,
-        // a touch of high-frequency buzz and noise. Generated once, cached, looped
-        // through a dedicated 2D AudioSource on the player so volume stays even.
-        private static AudioClip GenerateLaserClip()
-        {
-            const int sampleRate = 44100;
-            const int len = sampleRate; // 1 second loop
-            var data = new float[len];
-            var rng = new System.Random(0xA52F);
-            for (int i = 0; i < len; i++)
-            {
-                float t = i / (float)sampleRate;
-                float carrier   = Mathf.Sin(2f * Mathf.PI * 220f * t);
-                float harmonic  = Mathf.Sin(2f * Mathf.PI * 440f * t) * 0.4f;
-                float sub       = Mathf.Sin(2f * Mathf.PI * 110f * t) * 0.3f;
-                float buzz      = Mathf.Sin(2f * Mathf.PI * 1100f * t) * 0.08f;
-                float vibrato   = 0.85f + Mathf.Sin(2f * Mathf.PI * 8f * t) * 0.15f;
-                float noise     = ((float)rng.NextDouble() - 0.5f) * 0.05f;
-                data[i] = (carrier + harmonic + sub + buzz + noise) * vibrato * 0.18f;
-            }
-            var clip = AudioClip.Create("MegaShotArmageddonLaser", len, 1, sampleRate, false);
-            clip.SetData(data, 0);
-            return clip;
-        }
-
-        private static void EnsureLaserAudioSource(Player player)
-        {
-            if (player == null) return;
-            if (laserClip == null) laserClip = GenerateLaserClip();
-            if (laserAudioSource != null && laserSourceOwner == player.gameObject) return;
-            laserAudioSource = player.gameObject.AddComponent<AudioSource>();
-            laserSourceOwner = player.gameObject;
-            laserAudioSource.clip = laserClip;
-            laserAudioSource.loop = true;
-            laserAudioSource.spatialBlend = 0f; // 2D — first-person beam, no distance falloff
-            laserAudioSource.playOnAwake = false;
-            laserAudioSource.priority = 64;
-        }
-
-        private static void StartArmageddonLaser(Player player)
-        {
-            try
-            {
-                EnsureLaserAudioSource(player);
-                if (laserAudioSource == null) return;
-                laserAudioSource.volume = Mathf.Clamp01(MegaShotPlugin.ArmageddonLaserVolume.Value / 100f);
-                if (!laserAudioSource.isPlaying) laserAudioSource.Play();
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
-
-        private static void StopArmageddonLaser()
-        {
-            try
-            {
-                if (laserAudioSource != null && laserAudioSource.isPlaying)
-                    laserAudioSource.Stop();
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
-
-        // ---- Armageddon beam ----
-        // Thin red beam with procedural flicker: 7 vertices along the ray, each middle
-        // vertex jittered on the camera's perpendicular axes per-frame for a natural
-        // "alive" wobble. Width + alpha + colour all flicker so the beam reads as energy
-        // rather than a clean line.
-        private const int BeamSegments = 7;
-        private static readonly Vector3[] beamPositions = new Vector3[BeamSegments];
-
-        private static void EnsureBeamRenderer()
-        {
-            if (beamLine != null && beamObj != null) return;
-
-            beamObj = new GameObject("MegaShotArmageddonBeam");
-            UnityEngine.Object.DontDestroyOnLoad(beamObj);
-            beamLine = beamObj.AddComponent<LineRenderer>();
-
-            // Sprites/Default ships with every Unity build and supports vertex colour + alpha.
-            if (beamMaterial == null)
-            {
-                var shader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color");
-                beamMaterial = new Material(shader);
-            }
-            beamLine.material = beamMaterial;
-            beamLine.positionCount = BeamSegments;
-            beamLine.useWorldSpace = true;
-            beamLine.numCapVertices = 2;
-            beamLine.numCornerVertices = 0;
-            beamLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            beamLine.receiveShadows = false;
-            beamLine.enabled = false;
-        }
-
-        private static void StopArmageddonBeam()
-        {
-            try
-            {
-                if (beamLine != null) beamLine.enabled = false;
-                if (beamParticles != null) beamParticles.Stop(false, ParticleSystemStopBehavior.StopEmitting);
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
-
-        private static void EnsureBeamParticles()
-        {
-            if (beamParticles != null && beamParticlesObj != null) return;
-
-            beamParticlesObj = new GameObject("MegaShotArmageddonBeamParticles");
-            UnityEngine.Object.DontDestroyOnLoad(beamParticlesObj);
-            beamParticles = beamParticlesObj.AddComponent<ParticleSystem>();
-
-            // Disable auto-emission — we hand-emit along the beam each frame.
-            var emission = beamParticles.emission;
-            emission.enabled = false;
-
-            var main = beamParticles.main;
-            main.simulationSpace = ParticleSystemSimulationSpace.World;
-            main.startLifetime = 0.35f;
-            main.startSize = 0.04f;
-            main.startSpeed = 0f;
-            main.maxParticles = 400;
-            main.playOnAwake = false;
-            main.loop = true;
-            main.startColor = new Color(1f, 0.35f, 0.1f, 0.9f);
-
-            var shape = beamParticles.shape;
-            shape.enabled = false; // positions come from EmitParams
-
-            // Fade out over life.
-            var colourOverLife = beamParticles.colorOverLifetime;
-            colourOverLife.enabled = true;
-            var grad = new Gradient();
-            grad.SetKeys(
-                new[] {
-                    new GradientColorKey(new Color(1f, 0.6f, 0.2f), 0f),
-                    new GradientColorKey(new Color(1f, 0.15f, 0.05f), 1f)
-                },
-                new[] {
-                    new GradientAlphaKey(1f, 0f),
-                    new GradientAlphaKey(0f, 1f)
-                });
-            colourOverLife.color = new ParticleSystem.MinMaxGradient(grad);
-
-            // Shrink as they die.
-            var sizeOverLife = beamParticles.sizeOverLifetime;
-            sizeOverLife.enabled = true;
-            var curve = new AnimationCurve(
-                new Keyframe(0f, 1f),
-                new Keyframe(1f, 0.2f));
-            sizeOverLife.size = new ParticleSystem.MinMaxCurve(1f, curve);
-
-            var renderer = beamParticles.GetComponent<ParticleSystemRenderer>();
-            if (renderer != null)
-            {
-                // Sprites/Default works as an additive-ish billboarded point with vertex alpha.
-                var shader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Color");
-                renderer.material = new Material(shader);
-                renderer.renderMode = ParticleSystemRenderMode.Billboard;
-                renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
-            }
-
-            beamParticles.Play();
-        }
-
-        /// <summary>
-        /// Hand-emit a handful of particles per frame scattered along the beam.
-        /// Positions jitter perpendicular to the beam so the motes hug it loosely;
-        /// velocities drift outward + slightly upward for a floaty ember feel.
-        /// Size is scoped so it doesn't balloon through the scope's magnified FOV.
-        /// </summary>
-        private static void EmitBeamParticles(Vector3 origin, Vector3 endPoint, float flash, float widthScale)
-        {
-            if (beamParticles == null) return;
-
-            Vector3 dir = endPoint - origin;
-            float len = dir.magnitude;
-            if (len < 0.1f) return;
-
-            Vector3 fwd = dir / len;
-            Vector3 right = Vector3.Cross(fwd, Vector3.up);
-            if (right.sqrMagnitude < 0.0001f) right = Vector3.Cross(fwd, Vector3.right);
-            right.Normalize();
-            Vector3 up = Vector3.Cross(right, fwd).normalized;
-
-            // Scale particle count with beam length so distant beams still look populated,
-            // but cap so 500m beams don't melt perf.
-            int count = Mathf.Clamp(Mathf.RoundToInt(len * 0.25f) + 4, 4, 24);
-            // Hit flash boosts particle count briefly for an extra burst of sparks.
-            if (flash > 0f) count += Mathf.RoundToInt(flash * 12f);
-
-            // Perpendicular jitter tied to distance so nearby beams keep motes tight.
-            float perpScale = Mathf.Lerp(0.015f, 0.08f, Mathf.Clamp01(len / 120f));
-
-            var emit = new ParticleSystem.EmitParams();
-            emit.applyShapeToPosition = false;
-
-            for (int i = 0; i < count; i++)
-            {
-                float t = UnityEngine.Random.value;
-                Vector3 basePos = Vector3.Lerp(origin, endPoint, t);
-                float jr = (UnityEngine.Random.value - 0.5f) * 2f;
-                float ju = (UnityEngine.Random.value - 0.5f) * 2f;
-                Vector3 offset = right * (jr * perpScale) + up * (ju * perpScale);
-                emit.position = basePos + offset;
-
-                // Drift outward from the beam (so motes look like they peel off) +
-                // a gentle upward bias (hot air rising).
-                Vector3 vel = (right * jr + up * (ju + 0.4f)) * 0.35f;
-                emit.velocity = vel;
-
-                // Size scoped + slight randomisation + flash swell.
-                float sz = 0.03f * widthScale * (0.7f + UnityEngine.Random.value * 0.8f);
-                sz *= 1f + flash * 1.2f;
-                emit.startSize = sz;
-
-                emit.startLifetime = 0.25f + UnityEngine.Random.value * 0.25f;
-
-                // Near the impact point, skew brighter/yellow-white for a sparking feel.
-                float heat = Mathf.Clamp01(t * 1.2f - 0.2f) * (0.5f + flash);
-                emit.startColor = Color.Lerp(
-                    new Color(1f, 0.35f, 0.1f, 0.9f),
-                    new Color(1f, 0.85f, 0.5f, 1f),
-                    heat);
-
-                beamParticles.Emit(emit, 1);
-            }
-        }
-
-        /// <summary>
-        /// Per-frame Armageddon beam update.
-        /// While `firing` is true, draws a line from the weapon origin to the crosshair impact
-        /// and ticks destroy-tagged damage at a fixed 30 Hz on whatever's hit.
-        /// All damage flows through the existing destroy/AOE pipeline via the armageddon marker,
-        /// so trees are still spared and AOE radius still applies.
-        /// </summary>
-        private static void UpdateArmageddonBeam(Player player, ItemDrop.ItemData weapon, bool firing)
-        {
-            try
-            {
-                if (!firing)
-                {
-                    StopArmageddonBeam();
-                    ReleaseFiringAnimation(player);
-                    return;
-                }
-
-                Camera cam;
-                Ray aimRay;
-                if (!GetAimRay(out cam, out aimRay))
-                {
-                    StopArmageddonBeam();
-                    return;
-                }
-
-                // v2.6.39: custom LineRenderer beam visual + particle motes
-                // removed at Milord's request. The visual was potentially
-                // overriding/hiding the underlying Dundr cast pose. Now we
-                // just raycast for damage targeting and let the vanilla
-                // Dundr animation (driven by SetTrigger below) do its own
-                // visual. If we want a beam back later it should ride on
-                // top of the cast, not replace it.
-                StopArmageddonBeam();
-
-                // Find impact point (or the far end of the ray when nothing is hit).
-                float maxRange = Mathf.Max(50f, (float)MegaShotPlugin.ArmageddonRange.Value);
-                RaycastHit hit;
-                Vector3 endPoint;
-                bool isDamageable;
-                bool hasHit = BeamRaycast(aimRay, player, maxRange, out hit, out endPoint, out isDamageable);
-
-                // Stamp the beam-active timestamp so the drop suppressor swallows
-                // junk drops (stone/wood/etc.) that spawn anywhere in the world for
-                // the next few seconds — covers cascading AOE chains and MineRock5
-                // sub-area fractures whose drops scatter well past the raw impact.
-                ArmageddonSuppression.MarkBeamActive();
-
-                // Pulse the cast trigger every frame while LMB is held.
-                // Milord's clue (FireRate=100 in Normal mode → reads as a
-                // constant beam) shows that retriggering staff_rapidfire
-                // before the 0.467 s clip can play out parks the animator
-                // on early frames of the cast pose, which is exactly the
-                // continuous-cast look we want for Armageddon. So no time
-                // throttle, no state gate — frame-rate spam (60-200 Hz)
-                // IS the visual.
-                //
-                // v2.6.43: animation pulse uses `crossbow_fire` (matches the
-                // crossbow stance the animator is parked in by m_skillType).
-                // Gate at 100 rps explicitly per Milord's spec — the same
-                // cadence Normal mode at FireRate=100 produces, which reads
-                // as a constant beam because the crossbow_fire clip is
-                // restarted every 10 ms and the body parks on early frames.
-                try
-                {
-                    var atk = weapon?.m_shared?.m_attack;
-                    if (atk != null && Time.time - _lastArmageddonAnimPulse >= 0.01f)
-                    {
-                        PulseFiringAnimation(player, atk);
-                        _lastArmageddonAnimPulse = Time.time;
-                    }
-                }
-                catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-
-                // Damage ticks at a fixed constant rate — no longer gated by FireRate config.
-                float interval = 1f / BEAM_TICK_RATE;
-                if (Time.time - lastBeamTickTime < interval) return;
-                lastBeamTickTime = Mathf.Max(lastBeamTickTime + interval, Time.time - interval);
-
-                if (!hasHit) return;
-
-                ApplyBeamHit(player, weapon, hit, endPoint);
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
-
-        /// <summary>
-        /// Armageddon-specific raycast with configurable range. Mirrors RaycastCrosshair
-        /// but honours `ArmageddonRange` instead of the 1000 m default used by aim helpers.
-        /// </summary>
-        private static bool BeamRaycast(Ray aimRay, Player player, float maxRange, out RaycastHit hit, out Vector3 endPoint, out bool isDamageable)
-        {
-            int layerMask = ~(LayerMask.GetMask("UI", "character_trigger", "viewblock", "WaterVolume", "Water", "smoke"));
-            RaycastHit[] hits = Physics.RaycastAll(aimRay.origin, aimRay.direction, maxRange, layerMask);
-            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
-            Transform playerRoot = player.transform.root;
-            for (int i = 0; i < hits.Length; i++)
-            {
-                Transform hitRoot = hits[i].collider.transform.root;
-                if (hitRoot == playerRoot) continue;
-                if (hits[i].collider.isTrigger) continue;
-                hit = hits[i];
-                endPoint = hit.point;
-                var go = hit.collider.gameObject;
-                // Character / destructible / rock → always damageable by the beam.
-                // WearNTear is only damageable if it's an allowlisted destroyable piece
-                // (fortress doors, stairs, upper-walls). Fortress walls + player builds
-                // aren't — no flash bloom on them, matches the damage gate below.
-                var wntTest = go.GetComponentInParent<WearNTear>();
-                isDamageable =
-                    go.GetComponentInParent<Character>() != null ||
-                    go.GetComponentInParent<Destructible>() != null ||
-                    go.GetComponentInParent<MineRock5>() != null ||
-                    go.GetComponentInParent<MineRock>() != null ||
-                    (wntTest != null && PatchBuildingDamage.IsDestroyableWorldPiece(wntTest));
-                return true;
-            }
-            hit = default(RaycastHit);
-            endPoint = aimRay.origin + aimRay.direction * maxRange;
-            isDamageable = false;
-            return false;
-        }
-
-        private static void ApplyBeamHit(Player player, ItemDrop.ItemData weapon, RaycastHit hit, Vector3 hitPoint)
-        {
-            try
-            {
-                if (hit.collider == null) return;
-                GameObject go = hit.collider.gameObject;
-                if (go == null) return;
-
-                // Armageddon target gate: bail out completely on spared targets
-                // (ore veins, food sources, drake nests, dungeon decor, etc.).
-                // Characters are always allowed through — the gate's component
-                // check returns false on Character roots so this is safe.
-                if (go.GetComponentInParent<Character>() == null
-                    && ArmageddonTargetFilter.IsSparedByArmageddon(go))
-                {
-                    // (No per-tick log — IsSparedByArmageddon already
-                    // logs unique unmatched targets via LogUnmatchedOnce.)
-                    // Still apply a Character-only splash so creatures hiding
-                    // behind dungeon walls / decor / spared rocks still take
-                    // damage. Without this, a beam aimed at a draugr standing
-                    // behind a crypt wall hits the wall, spares it, returns,
-                    // and the draugr never gets touched.
-                    try { ApplyArmageddonCharacterSplash(player, hitPoint); }
-                    catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-                    return;
-                }
-
-                // Build an Armageddon-tagged HitData. Marker (chop/pickaxe = 999998 + backstabBonus = -7777)
-                // routes through the existing destroy/AOE pipeline and spares trees.
-                HitData hitData = new HitData();
-                hitData.m_damage.m_damage   = 999999f;
-                hitData.m_damage.m_blunt    = 999999f;
-                hitData.m_damage.m_slash    = 999999f;
-                hitData.m_damage.m_pierce   = 999999f;
-                hitData.m_damage.m_chop     = 999998f;
-                hitData.m_damage.m_pickaxe  = 999998f;
-                hitData.m_damage.m_fire     = 999999f;
-                hitData.m_damage.m_frost    = 999999f;
-                hitData.m_damage.m_lightning= 999999f;
-                hitData.m_damage.m_poison   = 999999f;
-                hitData.m_damage.m_spirit   = 999999f;
-                hitData.m_toolTier = 9999;
-                hitData.m_backstabBonus = -7777f; // armageddon sentinel
-                hitData.m_skill = Skills.SkillType.Crossbows;
-                hitData.m_point = hitPoint;
-                hitData.m_dir = (hitPoint - player.transform.position).normalized;
-                try { hitData.SetAttacker(player); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-
-                // Direct hit dispatch — fire all known target types so we don't miss anything.
-                // Each Damage() invocation triggers its own destroy postfix → TryAOEDestroy
-                // (which spares trees in armageddon and applies the configured AOE radius).
-                bool hitSomething = false;
-
-                var character = go.GetComponentInParent<Character>();
-                if (character != null && !ArmageddonSuppression.IsFriendlyToBeam(character, player))
-                {
-                    character.Damage(hitData);
-                    hitSomething = true;
-                }
-
-                var dest = go.GetComponentInParent<Destructible>();
-                if (dest != null) { dest.Damage(hitData); hitSomething = true; }
-
-                var rock5 = go.GetComponentInParent<MineRock5>();
-                if (rock5 != null)
-                {
-                    ArmageddonSuppression.MarkMineRockDestroyed();
-                    rock5.Damage(hitData);
-                    hitSomething = true;
-                }
-
-                var rock = go.GetComponentInParent<MineRock>();
-                if (rock != null)
-                {
-                    ArmageddonSuppression.MarkMineRockDestroyed();
-                    rock.Damage(hitData);
-                    hitSomething = true;
-                }
-
-                // Armageddon (v2.6.15): never damages WearNTear pieces —
-                // fortresses, dungeon walls, player builds. The structural-
-                // support cascade was levelling whole fortresses even when we
-                // only nominally hit Gate_Door / Ashland_Stair. Hard-blocked
-                // here AND in the WearNTear.Damage Prefix.
-
-                // v2.6.21: TreeBase + TreeLog direct hits. The spare gate
-                // above already filters full-grown trees; reaching here in
-                // Armageddon means the target is a small / sapling / dead
-                // variant or a fallen log — explicitly destroyable per
-                // Milord's spec. Drops (seeds, ashwood, etc.) flow through
-                // vanilla `m_dropWhenDestroyed`.
-                var tree = go.GetComponentInParent<TreeBase>();
-                if (tree != null) { tree.Damage(hitData); hitSomething = true; }
-
-                var tlog = go.GetComponentInParent<TreeLog>();
-                if (tlog != null) { tlog.Damage(hitData); hitSomething = true; }
-
-                // If we hit purely terrain or no recognised target, still trigger AOE so
-                // surrounding rocks/saplings get vaporised at the impact point.
-                if (!hitSomething)
-                {
-                    DestroyObjectsHelper.TryAOEDestroy(hitData, hitPoint);
-                }
-            }
-            catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-        }
+        // ---- Animation + Audio Helpers ----
 
         private static void EnsureCachedAudioSource(Player player)
         {
@@ -1807,77 +1295,19 @@ namespace MegaShot
             }
         }
 
-        // Pulses the player's firing animation by routing through vanilla
-        // `Humanoid.StartAttack` — the only path that does ALL the animator
-        // setup vanilla relies on (m_currentAttack assignment, animator BOOLs,
-        // animation event hookup, ZSyncAnimation triggers, etc.). Manual
-        // SetTrigger-only attempts (v2.6.27) and CrossFade-every-frame
-        // attempts (v2.6.28) both failed: SetTrigger alone didn't satisfy
-        // the controller's transition gates, and CrossFade-every-frame froze
-        // the animator on frame 0 and clobbered other animations sharing
-        // the same animator.
-        //
-        // We toggle a flag that lets PatchBlockVanillaAttack pass through
-        // (it normally returns false to suppress vanilla auto-firing on
-        // mouse click). Vanilla rate-limits StartAttack via `m_currentAttack`
-        // — we clear it via reflection before each call so high fire rates
-        // can keep retriggering.
-        //
-        // Vanilla projectile spawn happens later via the animation's event
-        // callback. To prevent a duplicate of our manually-fired projectile,
-        // we null `m_attackProjectile` for the duration of the StartAttack
-        // call. The animation event reads `attack.m_attackProjectile` when
-        // it fires (which can be after we've restored it), so we also patch
-        // `Attack.OnAttackTrigger` to short-circuit when the firing flag
-        // hasn't been set by us — i.e. the legitimate vanilla path is fine,
-        // but our induced StartAttack call won't double-fire a Dundr bolt.
-        // Reverted in v2.6.31: do NOT call vanilla StartAttack. It plays
-        // m_startEffect (Dundr's cast SFX = the "trinket sound") every call
-        // without actually producing the cast animation — the animator state
-        // machine evidently rejects the transition without additional gating
-        // state vanilla sets through a path we haven't found yet. So we get
-        // the audio cost with none of the visual benefit.
-        //
-        // For now: just SetTrigger via ZSyncAnimation (same as vanilla's
-        // call into Attack.Start does internally). Animation may not play
-        // visibly but no spurious sound effects fire either. The diagnostic
-        // dump below will tell us which animator parameters / states exist
-        // so we can find what gate the cast transition is checking.
-        internal static bool _vanillaStartAttackAllowed = false; // unused, kept so PatchBlockVanillaAttack still compiles
-        internal static bool _suppressVanillaProjectile = false; // unused
+        // Flags retained so PatchBlockVanillaAttack still compiles.
+        // Both unused by current PulseFiringAnimation (which goes via
+        // ZSyncAnimation.SetTrigger only — see v2.6.31 history in the
+        // Animation Fix plan).
+        internal static bool _vanillaStartAttackAllowed = false;
+        internal static bool _suppressVanillaProjectile = false;
         private static FieldInfo _zanimField;
         private static bool _zanimFieldCached = false;
-
-        // v2.6.32 set `staff_charging` (Bool) thinking it gated the
-        // `staff_lightningshot` trigger. Wrong: `staff_charging=true` puts
-        // the animator in the staff DRAW/CHARGE state — the long arm-pull
-        // pose vanilla Dundr uses on LMB-press, which Milord saw as a
-        // "reload after every shot" because at fire rate the cycle was
-        // staff_charging → tiny fire → release → repeat.
-        //
-        // Proper trigger for rapid-fire-without-charge is `staff_rapidfire`
-        // (also exposed in the v2.6.31 ANIM-DIAG dump). We override the
-        // weapon's `m_attack.m_attackAnimation` to that at prefab build
-        // time, so PulseFiringAnimation's plain SetTrigger fires the
-        // right clip without needing the BOOL gate.
-        //
-        // ReleaseFiringAnimation is now a no-op stub kept for call-site
-        // compatibility — there's no BOOL to clear.
-
-        // v2.6.42 — REVERT v2.6.41's direct Animator.SetTrigger (the lockup
-        // vector — bypassed ZSync's gate-keeping and parked the animator
-        // permanently in attack state, closing input gates). Back to
-        // zanim.SetTrigger only, plus a much beefier one-shot diagnostic so
-        // we can see WHY the trigger isn't visibly transitioning even
-        // though the animator is correct (Visual rig, layer 1 weight = 1).
-        // The expanded dump prints clip names per layer, every animator
-        // parameter (name + type + value), and known-trigger hash matches
-        // — that should reveal the actual gate (likely a weapon-state int
-        // parameter that needs to be in the staff value, not crossbow).
         private static FieldInfo _zanimAnimatorField;
         private static bool _zanimAnimatorFieldCached = false;
         private static bool _animDiagDumped = false;
         private static int _animProbeCounter = 0;
+
         private static string ProbeFirstClipName(Animator a, int layer)
         {
             try
@@ -1888,6 +1318,10 @@ namespace MegaShot
             }
             catch { return "(err)"; }
         }
+
+        // PulseFiringAnimation — fires the weapon's m_attackAnimation trigger
+        // through ZSyncAnimation. v2.6.44 confirmed this puts layer 0 into
+        // the "Fire Crossbow" state when bow_aim=true is set first.
         private static void PulseFiringAnimation(Player player, Attack attack)
         {
             if (player == null || attack == null) return;
@@ -1921,24 +1355,12 @@ namespace MegaShot
                 string trig = attack.m_attackAnimation;
                 if (string.IsNullOrEmpty(trig)) return;
 
-                // v2.6.44: set bow_aim = true as a prerequisite. Vanilla
-                // crossbow_fire (and bow_fire) transitions are gated on
-                // bow_aim=true — the animator routes through an aim
-                // sub-state. With bow_aim=false (the default while just
-                // holding the weapon), the trigger has no valid transition
-                // out of CrossbowWalk/CrossbowIdle and gets silently
-                // consumed. Setting bow_aim=true puts the animator into
-                // the aim state and the next trigger fires the cast.
+                // Vanilla crossbow_fire transitions are gated on bow_aim=true.
                 if (cachedAnimator != null)
                 {
-                    try { cachedAnimator.SetBool("bow_aim", true); }
-                    catch (Exception ex2) { DiagnosticHelper.LogException("MegaShot", ex2); }
+                    try { cachedAnimator.SetBool("bow_aim", true); } catch { }
                 }
 
-                // ZSyncAnimation.SetTrigger ONLY — no direct cachedAnimator.SetTrigger.
-                // The direct call bypassed ZSync's per-frame gate-keeping in
-                // v2.6.41 and re-introduced the input-lock that v2.6.39
-                // emergency-reverted.
                 zanim.SetTrigger(trig);
 
                 if (MegaShotPlugin.DebugMode != null && MegaShotPlugin.DebugMode.Value)
@@ -1950,9 +1372,6 @@ namespace MegaShot
                         try { AnimatorDeepDiag(cachedAnimator, trig); }
                         catch (Exception ex2) { DiagnosticHelper.LogException("MegaShot", ex2); }
                     }
-                    // Compact post-trigger probe: log layer 0 + 1 clip names
-                    // every 30th pulse so we can see if the transition ever
-                    // takes effect after we set bow_aim=true.
                     _animProbeCounter++;
                     if (_animProbeCounter >= 30 && cachedAnimator != null)
                     {
@@ -1970,17 +1389,13 @@ namespace MegaShot
             catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
         }
 
+        // Stub — kept for call-site compatibility.
+        private static void ReleaseFiringAnimation(Player player) { }
+
         // One-shot deep diagnostic — fires once on first DebugMode pulse.
-        // Prints animator name, every layer's current clip name + state hash
-        // + weight + normalized time, every parameter name+type+value, and
-        // hash matches for likely candidate state names. The goal: spot
-        // which parameter (probably an int weapon-state) is parking the
-        // animator in a sub-tree that has no transition into staff_rapidfire.
         private static void AnimatorDeepDiag(Animator a, string ourTrigger)
         {
             DiagnosticHelper.Log("ANIM-DIAG: animator=" + a.name + " layers=" + a.layerCount + " parameterCount=" + a.parameterCount);
-
-            // Per-layer state + clip
             for (int i = 0; i < a.layerCount; i++)
             {
                 var s = a.GetCurrentAnimatorStateInfo(i);
@@ -2011,27 +1426,6 @@ namespace MegaShot
                     + " inTransition=" + a.IsInTransition(i)
                     + " clips=[" + clipNames + "]");
             }
-
-            // Hash matches against likely candidates
-            string[] candidates = new[] {
-                "staff_rapidfire", "staff_lightningshot", "staff_charge_attack",
-                "staff_fireball0", "staff_fireball1",
-                "bow_fire", "crossbow_fire", "crossbow_aim", "crossbow_load",
-                "Idle", "idle",
-                "staff_hold", "staff_idle", "Hold", "MovementHold",
-                "Crossbow", "Bow", "Staff", "RH_Idle"
-            };
-            int curShort0 = a.GetCurrentAnimatorStateInfo(0).shortNameHash;
-            int curShort1 = a.layerCount > 1 ? a.GetCurrentAnimatorStateInfo(1).shortNameHash : 0;
-            for (int c = 0; c < candidates.Length; c++)
-            {
-                int h = Animator.StringToHash(candidates[c]);
-                string mark = (h == curShort0) ? " <-L0" : (h == curShort1) ? " <-L1" : "";
-                if (h == curShort0 || h == curShort1)
-                    DiagnosticHelper.Log("ANIM-DIAG: HASH " + candidates[c] + "=" + h + mark);
-            }
-
-            // All animator parameters: name, type, current value
             for (int p = 0; p < a.parameterCount; p++)
             {
                 var par = a.GetParameter(p);
@@ -2051,54 +1445,8 @@ namespace MegaShot
             }
         }
 
-        // Stub — kept for call-site compatibility. v2.6.32's staff_charging
-        // BOOL was a mistake; there's nothing to release now.
-        private static void ReleaseFiringAnimation(Player player) { }
+        // ---- Sound Helpers ----
 
-        // Applies a Character-only splash around the impact point when the
-        // direct beam hit was a spared (non-character) target. Mirrors the
-        // damage payload built in ApplyBeamHit and uses ArmageddonAoeRadius.
-        // Drops flow through vanilla CharacterDrop.OnDeath — no extra wiring.
-        private static void ApplyArmageddonCharacterSplash(Player player, Vector3 hitPoint)
-        {
-            if (player == null) return;
-            float radius = MegaShotPlugin.ArmageddonAoeRadius.Value;
-            if (radius <= 0f) return;
-            int layerMask = LayerMask.GetMask("character", "character_net", "character_ghost", "character_noenv");
-            Collider[] nearby = Physics.OverlapSphere(hitPoint, radius, layerMask);
-            if (nearby == null || nearby.Length == 0) return;
-            HashSet<int> alreadyHit = new HashSet<int>();
-            alreadyHit.Add(player.GetInstanceID());
-            for (int i = 0; i < nearby.Length; i++)
-            {
-                var col = nearby[i];
-                if (col == null) continue;
-                var character = col.GetComponentInParent<Character>();
-                if (character == null) continue;
-                if (!alreadyHit.Add(character.GetInstanceID())) continue;
-                if (ArmageddonSuppression.IsFriendlyToBeam(character, player)) continue;
-
-                HitData splash = new HitData();
-                splash.m_damage.m_damage    = 999999f;
-                splash.m_damage.m_blunt     = 999999f;
-                splash.m_damage.m_slash     = 999999f;
-                splash.m_damage.m_pierce    = 999999f;
-                splash.m_damage.m_chop      = 999998f;
-                splash.m_damage.m_pickaxe   = 999998f;
-                splash.m_damage.m_fire      = 999999f;
-                splash.m_damage.m_frost     = 999999f;
-                splash.m_damage.m_lightning = 999999f;
-                splash.m_damage.m_poison    = 999999f;
-                splash.m_damage.m_spirit    = 999999f;
-                splash.m_toolTier = 9999;
-                splash.m_backstabBonus = -7777f; // armageddon sentinel
-                splash.m_skill = Skills.SkillType.None; // prevents PatchCrossbowAOE re-trigger
-                splash.m_point = character.GetCenterPoint();
-                splash.m_dir = (character.transform.position - hitPoint).normalized;
-                try { splash.SetAttacker(player); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-                try { character.Damage(splash); } catch (Exception ex) { DiagnosticHelper.LogException("MegaShot", ex); }
-            }
-        }
 
         private static readonly Dictionary<string, FieldInfo> _fieldCache = new Dictionary<string, FieldInfo>();
         private static FieldInfo GetCachedField(Type type, string fieldName)
